@@ -5,10 +5,16 @@
 # Current design: dark charcoal squircle, white chat bubble with a teal
 # counterclockwise rotate arrow inside ("recalled message is being undone").
 #
-# IMPORTANT: the artwork (the dark rounded square) is drawn in the centered
-# 80% "safe area" of the 1024px canvas, with transparent margins on all sides.
-# This is the macOS icon guideline; filling the whole canvas makes the icon
-# render ~25% larger than other apps in the Dock.
+# ICON GEOMETRY (measured against real macOS app icons):
+#   Chrome / WeChat / Notes / Photos / Messages all draw their artwork in the
+#   centered 80% of the 1024px canvas with 10% transparent margins — that is
+#   the Apple guideline, and full-bleed artwork really does render ~25% larger
+#   in the Dock. But at exactly 80%, our dark background plus a small white
+#   glyph reads as visually smaller/lighter than neighbouring light icons
+#   (dark colours contract, light ones expand). So we deliberately use 88%
+#   artwork (6% margins) and a larger glyph: the square is only ~10% larger
+#   than standard — never "a full size bigger" — while the icon gains the
+#   visual weight of the apps around it.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,14 +29,13 @@ let size = 1024.0
 let image = NSImage(size: NSSize(width: size, height: size))
 image.lockFocus()
 
-// Clear the whole canvas to transparent, then draw the icon artwork only in
-// the centered 80% safe area. The 10% transparent margin on each side is what
-// keeps the Dock rendering the same visual size as other macOS app icons.
+// Clear the whole canvas to transparent; draw the artwork in the centered
+// safe area so macOS scales it consistently with other Dock icons.
 let canvas = NSRect(x: 0, y: 0, width: size, height: size)
 if let cg = NSGraphicsContext.current?.cgContext { cg.clear(canvas) }
 
-let margin = size * 0.10
-let artSize = size * 0.80
+let margin = size * 0.06
+let artSize = size * 0.88
 let artRect = NSRect(x: margin, y: margin, width: artSize, height: artSize)
 let cx = size * 0.5
 let cy = size * 0.5
@@ -44,15 +49,15 @@ let bgBottom = NSColor(calibratedRed: 0.12, green: 0.13, blue: 0.15, alpha: 1)
 NSGradient(starting: bgTop, ending: bgBottom)?.draw(in: artRect, angle: -90)
 
 // White chat bubble: filled circle + small tail on the right side.
-// All radii are relative to artSize so the composition stays identical to
-// the original full-bleed design, just scaled inside the safe area.
-let r = artSize * 0.295
+// The tail is kept short enough that the larger glyph still has breathing
+// room inside the artwork (1.33r instead of 1.46r).
+let r = artSize * 0.33
 let bubble = NSBezierPath()
 bubble.appendArc(withCenter: NSPoint(x: cx, y: cy), radius: r,
                  startAngle: 0, endAngle: 360, clockwise: false)
 let tail = NSBezierPath()
 tail.move(to: NSPoint(x: cx + r * 0.90, y: cy + r * 0.34))
-tail.line(to: NSPoint(x: cx + r * 1.46, y: cy + r * 0.12))
+tail.line(to: NSPoint(x: cx + r * 1.33, y: cy + r * 0.12))
 tail.line(to: NSPoint(x: cx + r * 0.86, y: cy - r * 0.40))
 tail.close()
 NSColor.white.set()
@@ -62,7 +67,7 @@ tail.fill()
 // Teal counterclockwise rotate arrow inside the bubble.
 // Arc spans top -> left -> bottom -> right with a gap at the top-right;
 // the arrowhead lands on the right side moving upward (undo motion).
-let aR = artSize * 0.16
+let aR = artSize * 0.18
 let stroke = artSize * 0.056
 let arc = NSBezierPath()
 arc.appendArc(withCenter: NSPoint(x: cx, y: cy), radius: aR,
