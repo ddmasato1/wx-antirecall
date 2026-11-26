@@ -1,909 +1,165 @@
+import Foundation
 import XCTest
 @testable import WeChatAntiRecall
 
-final class PatchConfigTests: XCTestCase {
-    func testBuild268831SupportsOnlyRecallPatchModes() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "268831" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip"])
-
-        let revoke = try XCTUnwrap(config.targets.first { $0.identifier == "revoke" })
-        XCTAssertEqual(revoke.binaryPath, "Contents/Resources/wechat.dylib")
-        XCTAssertEqual(revoke.entries.count, 1)
-        XCTAssertEqual(revoke.entries[0].arch, .arm64)
-        XCTAssertEqual(revoke.entries[0].address, 0x48f6fec)
-        XCTAssertEqual(revoke.entries[0].expectedBytes, [try Data(hexString: "E00F0034")])
-        XCTAssertEqual(revoke.entries[0].patchBytes, try Data(hexString: "7F000014"))
-
-        let revokeTip = try XCTUnwrap(config.targets.first { $0.identifier == "revoke-tip" })
-        XCTAssertEqual(revokeTip.binaryPath, "Contents/Resources/wechat.dylib")
-        XCTAssertEqual(revokeTip.entries.count, 2)
-        XCTAssertEqual(revokeTip.entries[0].arch, .arm64)
-        XCTAssertEqual(revokeTip.entries[0].address, 0x48f6fec)
-        XCTAssertEqual(revokeTip.entries[0].expectedBytes, [
-            try Data(hexString: "E00F0034"),
-            try Data(hexString: "7F000014")
-        ])
-        XCTAssertEqual(revokeTip.entries[0].patchBytes, try Data(hexString: "E00F0034"))
-        XCTAssertEqual(revokeTip.entries[1].arch, .arm64)
-        XCTAssertEqual(revokeTip.entries[1].address, 0x48f7780)
-        XCTAssertEqual(revokeTip.entries[1].expectedBytes, [try Data(hexString: "60B600F9")])
-        XCTAssertEqual(revokeTip.entries[1].patchBytes, try Data(hexString: "7FB600F9"))
-    }
-
-    func testBuild268849SupportsRecallPatchModes() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "268849" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-
-        let revoke = try XCTUnwrap(config.targets.first { $0.identifier == "revoke" })
-        XCTAssertEqual(revoke.binaryPath, "Contents/Resources/wechat.dylib")
-        XCTAssertEqual(revoke.entries.count, 1)
-        XCTAssertEqual(revoke.entries[0].arch, .arm64)
-        XCTAssertEqual(revoke.entries[0].address, 0x488c734)
-        XCTAssertEqual(revoke.entries[0].expectedBytes, [try Data(hexString: "E00F0034")])
-        XCTAssertEqual(revoke.entries[0].patchBytes, try Data(hexString: "7F000014"))
-
-        let revokeTip = try XCTUnwrap(config.targets.first { $0.identifier == "revoke-tip" })
-        XCTAssertEqual(revokeTip.binaryPath, "Contents/Resources/wechat.dylib")
-        XCTAssertEqual(revokeTip.entries.count, 2)
-        XCTAssertEqual(revokeTip.entries[0].arch, .arm64)
-        XCTAssertEqual(revokeTip.entries[0].address, 0x488c734)
-        XCTAssertEqual(revokeTip.entries[0].expectedBytes, [
-            try Data(hexString: "E00F0034"),
-            try Data(hexString: "7F000014")
-        ])
-        XCTAssertEqual(revokeTip.entries[0].patchBytes, try Data(hexString: "E00F0034"))
-        XCTAssertEqual(revokeTip.entries[1].arch, .arm64)
-        XCTAssertEqual(revokeTip.entries[1].address, 0x488cec8)
-        XCTAssertEqual(revokeTip.entries[1].expectedBytes, [try Data(hexString: "60B600F9")])
-        XCTAssertEqual(revokeTip.entries[1].patchBytes, try Data(hexString: "7FB600F9"))
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.binaryPath, "Contents/Resources/wechat.dylib")
-        XCTAssertEqual(update.entries.count, 9)
-        XCTAssertTrue(update.entries.allSatisfy { $0.arch == .arm64 })
-        // Every update entry neutralizes a function: the patch ends in `ret` (C0035FD6).
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-        // Spot-check the first prologue and a getter rewrite against the reference build 268601 mapping.
-        XCTAssertEqual(update.entries[0].address, 0x1cd5bc)
-        XCTAssertEqual(update.entries[0].expectedBytes, [try Data(hexString: "FC6FBBA9")])
-        XCTAssertEqual(update.entries[5].address, 0x1d9514)
-        XCTAssertEqual(update.entries[5].expectedBytes, [try Data(hexString: "00604039C0035FD6")])
-        XCTAssertEqual(update.entries[5].patchBytes, try Data(hexString: "00008052C0035FD6"))
-
-        // 268849 has no WeChat dispatch stub, so runtime-tip is delivered via the inline
-        // hook: a static entry rewrite at parseRevokeXML's entry that routes through the
-        // injected dylib. The rewrite overwrites the 3-instruction prologue with a
-        // 12-byte adrp/ldr/br stub.
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.binaryPath, "Contents/Resources/wechat.dylib")
-        XCTAssertEqual(runtimeTip.entries.count, 1)
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x488c4c4)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "F06402F0108247F900021FD6"))
-    }
-
-    func testBuild268850MirrorsBuild268849() throws {
-        // 268850 is a +1 hotfix of 268849, byte-identical across every patch site and the
-        // SLOT slack, so its config must be an exact copy (same targets/addresses/bytes).
-        let configs = try loadPatchConfigs()
-        let c849 = try XCTUnwrap(configs.first { $0.version == "268849" })
-        let c850 = try XCTUnwrap(configs.first { $0.version == "268850" })
-
-        XCTAssertEqual(c849.targets.map(\.identifier), c850.targets.map(\.identifier))
-        for (t849, t850) in zip(c849.targets, c850.targets) {
-            XCTAssertEqual(t849.identifier, t850.identifier)
-            XCTAssertEqual(t849.binaryPath, t850.binaryPath)
-            XCTAssertEqual(t849.entries, t850.entries)
-        }
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("268850"))
-    }
-
-    func testRuntimeTipSupportedBuildsIncludeInlineHookBuild() throws {
-        // 268849 is supported via the inline hook, so it must be advertised; and it must
-        // carry the runtime-tip static-patch target that the inline hook depends on.
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("268849"))
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "268849" })
-        XCTAssertNotNil(config.targets.first { $0.identifier == "runtime-tip" })
-    }
-
-    func testBuild269077SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        // 269077 (WeChat 4.1.11) is a new marketing version: parseRevokeXML kept its body
-        // (prologue + cbz w0 @ entry+0x270 + str x0,[x19,#0x168] @ entry+0xA04) but
-        // relocated to 0x48a4d68 — a unique geometry match across the whole arm64 slice.
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269077" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-
-        let revoke = try XCTUnwrap(config.targets.first { $0.identifier == "revoke" })
-        XCTAssertEqual(revoke.binaryPath, "Contents/Resources/wechat.dylib")
-        XCTAssertEqual(revoke.entries.count, 1)
-        XCTAssertEqual(revoke.entries[0].arch, .arm64)
-        XCTAssertEqual(revoke.entries[0].address, 0x48a4fd8)
-        XCTAssertEqual(revoke.entries[0].expectedBytes, [try Data(hexString: "E00F0034")])
-        XCTAssertEqual(revoke.entries[0].patchBytes, try Data(hexString: "7F000014"))
-
-        let revokeTip = try XCTUnwrap(config.targets.first { $0.identifier == "revoke-tip" })
-        XCTAssertEqual(revokeTip.binaryPath, "Contents/Resources/wechat.dylib")
-        XCTAssertEqual(revokeTip.entries.count, 2)
-        XCTAssertEqual(revokeTip.entries[0].arch, .arm64)
-        XCTAssertEqual(revokeTip.entries[0].address, 0x48a4fd8)
-        XCTAssertEqual(revokeTip.entries[0].expectedBytes, [
-            try Data(hexString: "E00F0034"),
-            try Data(hexString: "7F000014")
-        ])
-        XCTAssertEqual(revokeTip.entries[0].patchBytes, try Data(hexString: "E00F0034"))
-        XCTAssertEqual(revokeTip.entries[1].arch, .arm64)
-        XCTAssertEqual(revokeTip.entries[1].address, 0x48a576c)
-        XCTAssertEqual(revokeTip.entries[1].expectedBytes, [try Data(hexString: "60B600F9")])
-        XCTAssertEqual(revokeTip.entries[1].patchBytes, try Data(hexString: "7FB600F9"))
-
-        // Update blocking: the 8 sites were located by resolving XAppUpdateManager's ObjC
-        // selectors -> IMPs (cross-validated against the 268831 binary, same selectors and
-        // prologues). Four trigger methods get `ret` at entry (startUpdater, checkForUpdates:,
-        // startBackgroundUpdatesCheck:, enableAutoUpdate:) and the two force-update flag
-        // accessors (automaticallyDownloadsUpdates @0x18, canCheckForUpdate @0x19) are forced
-        // to return 0 with their setters neutered to `ret`.
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.binaryPath, "Contents/Resources/wechat.dylib")
-        XCTAssertEqual(update.entries.count, 8)
-        XCTAssertTrue(update.entries.allSatisfy { $0.arch == .arm64 })
-        // Every update entry neutralizes a function: the patch ends in `ret` (C0035FD6).
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-        // startUpdater entry -> ret.
-        XCTAssertEqual(update.entries[0].address, 0x1d393c)
-        XCTAssertEqual(update.entries[0].expectedBytes, [try Data(hexString: "FC6FBBA9")])
-        XCTAssertEqual(update.entries[0].patchBytes, try Data(hexString: "C0035FD6"))
-        // checkForUpdates: entry -> ret.
-        XCTAssertEqual(update.entries[1].address, 0x1d5a74)
-        XCTAssertEqual(update.entries[1].expectedBytes, [try Data(hexString: "FFC305D1")])
-        // canCheckForUpdate getter -> return 0.
-        XCTAssertEqual(update.entries[6].address, 0x1dfffc)
-        XCTAssertEqual(update.entries[6].expectedBytes, [try Data(hexString: "00644039C0035FD6")])
-        XCTAssertEqual(update.entries[6].patchBytes, try Data(hexString: "00008052C0035FD6"))
-
-        // Inline hook: static entry rewrite (adrp x16, SLOT ; ldr x16,[x16,#0xf00] ; br x16)
-        // routing parseRevokeXML through the injected dylib. The SLOT (0x93b3f00) lives in
-        // the __DATA tail slack; the asm differs from 268849-268851 only in the adrp page.
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.binaryPath, "Contents/Resources/wechat.dylib")
-        XCTAssertEqual(runtimeTip.entries.count, 1)
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x48a4d68)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "705802F0108247F900021FD6"))
-
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269077"))
-    }
-
-    func testBuild269079SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        // 269079 (WeChat 4.1.11 hotfix) is NOT byte-identical to 269077 — the whole slice was
-        // rebased, so every site shifted. parseRevokeXML kept its body (prologue + cbz w0 @
-        // entry+0x270 + str x0,[x19,#0x168] @ entry+0xA04) and relocated to 0x48a7c4c, a unique
-        // geometry match across the arm64 slice. Field offsets 0x168/0x170 were re-decoded from
-        // the actual instructions in this binary.
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269079" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-
-        let revoke = try XCTUnwrap(config.targets.first { $0.identifier == "revoke" })
-        XCTAssertEqual(revoke.binaryPath, "Contents/Resources/wechat.dylib")
-        XCTAssertEqual(revoke.entries.count, 1)
-        XCTAssertEqual(revoke.entries[0].arch, .arm64)
-        XCTAssertEqual(revoke.entries[0].address, 0x48a7ebc)
-        XCTAssertEqual(revoke.entries[0].expectedBytes, [try Data(hexString: "E00F0034")])
-        XCTAssertEqual(revoke.entries[0].patchBytes, try Data(hexString: "7F000014"))
-
-        let revokeTip = try XCTUnwrap(config.targets.first { $0.identifier == "revoke-tip" })
-        XCTAssertEqual(revokeTip.binaryPath, "Contents/Resources/wechat.dylib")
-        XCTAssertEqual(revokeTip.entries.count, 2)
-        XCTAssertEqual(revokeTip.entries[0].arch, .arm64)
-        XCTAssertEqual(revokeTip.entries[0].address, 0x48a7ebc)
-        XCTAssertEqual(revokeTip.entries[0].expectedBytes, [
-            try Data(hexString: "E00F0034"),
-            try Data(hexString: "7F000014")
-        ])
-        XCTAssertEqual(revokeTip.entries[0].patchBytes, try Data(hexString: "E00F0034"))
-        XCTAssertEqual(revokeTip.entries[1].arch, .arm64)
-        XCTAssertEqual(revokeTip.entries[1].address, 0x48a8650)
-        XCTAssertEqual(revokeTip.entries[1].expectedBytes, [try Data(hexString: "60B600F9")])
-        XCTAssertEqual(revokeTip.entries[1].patchBytes, try Data(hexString: "7FB600F9"))
-
-        // Update blocking: the 8 sites were located by resolving XAppUpdateManager's ObjC
-        // selectors -> IMPs (same selectors and prologues as 269077, accessor fields 0x18/0x19).
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.binaryPath, "Contents/Resources/wechat.dylib")
-        XCTAssertEqual(update.entries.count, 8)
-        XCTAssertTrue(update.entries.allSatisfy { $0.arch == .arm64 })
-        // Every update entry neutralizes a function: the patch ends in `ret` (C0035FD6).
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-        // startUpdater entry -> ret.
-        XCTAssertEqual(update.entries[0].address, 0x1d3304)
-        XCTAssertEqual(update.entries[0].expectedBytes, [try Data(hexString: "FC6FBBA9")])
-        XCTAssertEqual(update.entries[0].patchBytes, try Data(hexString: "C0035FD6"))
-        // checkForUpdates: entry -> ret.
-        XCTAssertEqual(update.entries[1].address, 0x1d543c)
-        XCTAssertEqual(update.entries[1].expectedBytes, [try Data(hexString: "FFC305D1")])
-        // canCheckForUpdate getter -> return 0.
-        XCTAssertEqual(update.entries[6].address, 0x1df9c4)
-        XCTAssertEqual(update.entries[6].expectedBytes, [try Data(hexString: "00644039C0035FD6")])
-        XCTAssertEqual(update.entries[6].patchBytes, try Data(hexString: "00008052C0035FD6"))
-
-        // Inline hook: static entry rewrite (adrp x16, SLOT ; ldr x16,[x16,#0xf00] ; br x16)
-        // routing parseRevokeXML through the injected dylib. The SLOT (0x93b7f00) lives in the
-        // __DATA tail slack past __common; the asm differs from 269077 only in the adrp page.
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.binaryPath, "Contents/Resources/wechat.dylib")
-        XCTAssertEqual(runtimeTip.entries.count, 1)
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x48a7c4c)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "90580290108247F900021FD6"))
-
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269079"))
-    }
-
-    func testBuild269110SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269110" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x450a128)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x450a128, 0x450a8bc])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x264870, 0x2668e0, 0x266b70, 0x266f5c,
-            0x2707c8, 0x2707d0, 0x2707d8, 0x2707e0
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x4509eb8)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "109B02D0108247F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269110"))
-    }
-
-    func testBuild269333SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269333" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x463ef88)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x463ef88, 0x463f728])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x26e4c0, 0x2706ec, 0x2709bc, 0x270ddc,
-            0x27b1c0, 0x27b1c8, 0x27b1d0, 0x27b1d8
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x463ed18)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "70A102B0108247F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269333"))
-    }
-
-    func testBuild269334SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269334" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x461d894)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x461d894, 0x461e034])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x26c4c0, 0x26e6ec, 0x26e9bc, 0x26eddc,
-            0x2791c8, 0x2791d0, 0x2791d8, 0x2791e0
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x461d624)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "50A302D0108247F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269334"))
-    }
-
-    func testBuild269338SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269338" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x462dc70)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x462dc70, 0x462e410])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x26d4c0, 0x26f6ec, 0x26f9bc, 0x26fddc,
-            0x27a1c8, 0x27a1d0, 0x27a1d8, 0x27a1e0
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x462da00)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "90A302D0108247F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269338"))
-    }
-
-    func testBuild269340SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269340" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x462e470)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x462e470, 0x462ec10])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x26e4c0, 0x2706ec, 0x2709bc, 0x270ddc,
-            0x27b1d0, 0x27b1d8, 0x27b1e0, 0x27b1e8
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x462e200)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "90A302B0108247F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x45ce1a4)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "084049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "90A602B0108647F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269340"))
-    }
-
-    func testBuild269341SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269341" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x462e87c)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x462e87c, 0x462f01c])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x26e4c0, 0x2706ec, 0x2709bc, 0x270ddc,
-            0x27b1d0, 0x27b1d8, 0x27b1e0, 0x27b1e8
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x462e60c)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "90A302B0108247F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x45ce5b0)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "084049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "90A602B0108647F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269341"))
-    }
-
-    func testBuild269574SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269574" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x49056f8)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x49056f8, 0x4905e98])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x27c814, 0x27e94c, 0x27ec10, 0x27eff0,
-            0x289364, 0x28936c, 0x289374, 0x28937c
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x4905488)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "30AE02D0108247F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x48a3b20)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "50B10290108647F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269574"))
-    }
-
-    func testBuild269575SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269575" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x4905140)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x4905140, 0x49058e0])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x27d814, 0x27f94c, 0x27fc10, 0x27fff0,
-            0x28a35c, 0x28a364, 0x28a36c, 0x28a374
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x4904ed0)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "30AE02F0108247F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x48a3568)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "50B10290108647F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269575"))
-    }
-
-    func testBuild269576SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269576" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x490548c)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x490548c, 0x4905c2c])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x27c814, 0x27e94c, 0x27ec10, 0x27eff0,
-            0x28935c, 0x289364, 0x28936c, 0x289374
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x490521c)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "30AE02D0108247F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x48a38b4)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "50B10290108647F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269576"))
-    }
-
-    func testBuild269577SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269577" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x4958a94)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x4958a94, 0x4959234])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x27d068, 0x27f1a0, 0x27f464, 0x27f844,
-            0x289bb0, 0x289bb8, 0x289bc0, 0x289bc8
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x4958824)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "F0AF02F0108247F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x48f64dc)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "10B302B0108647F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269577"))
-    }
-
-    func testBuild269578SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269578" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x4958abc)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x4958abc, 0x495925c])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x27d068, 0x27f1a0, 0x27f464, 0x27f844,
-            0x289bb8, 0x289bc0, 0x289bc8, 0x289bd0
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x495884c)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "F0AF02F0108247F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x48f6504)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "10B302B0108647F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269578"))
-    }
-
-    func testBuild269579SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269579" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x4958aa0)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x4958aa0, 0x4959240])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x27d068, 0x27f1a0, 0x27f464, 0x27f844,
-            0x289bb0, 0x289bb8, 0x289bc0, 0x289bc8
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x4958830)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "F0AF02F0108247F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x48f64e8)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "10B302B0108647F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269579"))
-    }
-
-    func testBuild269619SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269619" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x497fb78)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x497fb78, 0x4980318])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x27cd98, 0x27efc4, 0x27f294, 0x27f6b4,
-            0x289f34, 0x289f3c, 0x289f44, 0x289f4c
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x497f908)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "10B10290108247F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x491cb1c)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "10B402F0108647F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269619"))
-    }
-
-    func testBuild269624SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269624" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x49adf38)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x49adf38, 0x49ae6d8])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x27ceac, 0x27f0d8, 0x27f3a8, 0x27f7c8,
-            0x28a048, 0x28a050, 0x28a058, 0x28a060
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x49adcc8)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "90B402D0108247F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x494aedc)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "B0B702B0108647F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269624"))
-    }
-
-    func testBuild269628SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "269628" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x49af200)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x49af200, 0x49af9a0])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x27becc, 0x27e0f8, 0x27e3c8, 0x27e7e8,
-            0x289068, 0x289070, 0x289078, 0x289080
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x49aef90)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "B0B402B0108247F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x494c1a4)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "B0B702F0108647F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("269628"))
-    }
-
-    func testBuild270090SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "270090" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x4bbe83c)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x4bbe83c, 0x4bbefdc])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x2768ac, 0x278ad8, 0x278da8, 0x2791c8,
-            0x283a48, 0x283a50, 0x283a58, 0x283a60
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x4bbe5cc)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "10BD02B0108247F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x4b5b0a0)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "30C00290108647F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("270090"))
-    }
-
-    func testBuild270100SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let configs = try loadPatchConfigs()
-        let config = try XCTUnwrap(configs.first { $0.version == "270100" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke" }?.entries.first?.address, 0x4bc4fa4)
-        XCTAssertEqual(config.targets.first { $0.identifier == "revoke-tip" }?.entries.map(\.address), [0x4bc4fa4, 0x4bc5744])
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x274f04, 0x277130, 0x277400, 0x277820,
-            0x2820a0, 0x2820a8, 0x2820b0, 0x2820b8
-        ])
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x4bc4d34)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "10BD02F010FA47F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x4b61808)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "30C002D010FE47F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("270100"))
-    }
-
-    func testBuild270102SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let config = try XCTUnwrap(loadPatchConfigs().first { $0.version == "270102" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertTrue(config.targets.allSatisfy { $0.binary == "Contents/Resources/wechat.dylib" })
-        XCTAssertTrue(config.targets.flatMap(\.entries).allSatisfy { $0.arch == .arm64 })
-
-        let revoke = try XCTUnwrap(config.targets.first { $0.identifier == "revoke" }?.entries.first)
-        XCTAssertEqual(revoke.address, 0x4bc53d8)
-        XCTAssertEqual(revoke.expectedBytes, [try Data(hexString: "40100034")])
-        XCTAssertEqual(revoke.patchBytes, try Data(hexString: "82000014"))
-        let tip = try XCTUnwrap(config.targets.first { $0.identifier == "revoke-tip" })
-        XCTAssertEqual(tip.entries.map(\.address), [0x4bc53d8, 0x4bc5b78])
-        XCTAssertEqual(tip.entries[0].expectedBytes, [try Data(hexString: "40100034"), try Data(hexString: "82000014")])
-        XCTAssertEqual(tip.entries[0].patchBytes, try Data(hexString: "40100034"))
-        XCTAssertEqual(tip.entries[1].expectedBytes, [try Data(hexString: "60E600F9")])
-        XCTAssertEqual(tip.entries[1].patchBytes, try Data(hexString: "7FE600F9"))
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x274f04, 0x277130, 0x277400, 0x277820,
-            0x2820a0, 0x2820a8, 0x2820b0, 0x2820b8
-        ])
-        XCTAssertEqual(update.entries.map(\.expectedBytes), try [
-            "FC6FBBA9", "FFC305D1", "FF4301D1", "F657BDA9",
-            "00604039C0035FD6", "02600039", "00644039C0035FD6", "02640039"
-        ].map { [try Data(hexString: $0)] })
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries.count, 2)
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x4bc5168)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "10BD02D010FA47F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x4b61c3c)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "30C002D010FE47F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("270102"))
-    }
-
-    func testBuild270132SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let config = try XCTUnwrap(loadPatchConfigs().first { $0.version == "270132" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertTrue(config.targets.allSatisfy { $0.binary == "Contents/Resources/wechat.dylib" })
-        XCTAssertTrue(config.targets.flatMap(\.entries).allSatisfy { $0.arch == .arm64 })
-
-        let revoke = try XCTUnwrap(config.targets.first { $0.identifier == "revoke" }?.entries.first)
-        XCTAssertEqual(revoke.address, 0x4d16f58)
-        XCTAssertEqual(revoke.expectedBytes, [try Data(hexString: "40100034")])
-        XCTAssertEqual(revoke.patchBytes, try Data(hexString: "82000014"))
-        let tip = try XCTUnwrap(config.targets.first { $0.identifier == "revoke-tip" })
-        XCTAssertEqual(tip.entries.map(\.address), [0x4d16f58, 0x4d176f8])
-        XCTAssertEqual(tip.entries[0].expectedBytes, [try Data(hexString: "40100034"), try Data(hexString: "82000014")])
-        XCTAssertEqual(tip.entries[0].patchBytes, try Data(hexString: "40100034"))
-        XCTAssertEqual(tip.entries[1].expectedBytes, [try Data(hexString: "60E600F9")])
-        XCTAssertEqual(tip.entries[1].patchBytes, try Data(hexString: "7FE600F9"))
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x28d9a4, 0x28fbd0, 0x28fea0, 0x2902c0,
-            0x29ab38, 0x29ab40, 0x29ab48, 0x29ab50
-        ])
-        XCTAssertEqual(update.entries.map(\.expectedBytes), try [
-            "FC6FBBA9", "FFC305D1", "FF4301D1", "F657BDA9",
-            "00604039C0035FD6", "02600039", "00644039C0035FD6", "02640039"
-        ].map { [try Data(hexString: $0)] })
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries.count, 2)
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x4d16ce8)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "F0C002B010FA47F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x4cb37bc)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "10C4029010FE47F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("270132"))
-    }
-
-    func testBuild270133SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let config = try XCTUnwrap(loadPatchConfigs().first { $0.version == "270133" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertTrue(config.targets.allSatisfy { $0.binary == "Contents/Resources/wechat.dylib" })
-        XCTAssertTrue(config.targets.flatMap(\.entries).allSatisfy { $0.arch == .arm64 })
-
-        let revoke = try XCTUnwrap(config.targets.first { $0.identifier == "revoke" }?.entries.first)
-        XCTAssertEqual(revoke.address, 0x4d156a8)
-        XCTAssertEqual(revoke.expectedBytes, [try Data(hexString: "40100034")])
-        XCTAssertEqual(revoke.patchBytes, try Data(hexString: "82000014"))
-        let tip = try XCTUnwrap(config.targets.first { $0.identifier == "revoke-tip" })
-        XCTAssertEqual(tip.entries.map(\.address), [0x4d156a8, 0x4d15e48])
-        XCTAssertEqual(tip.entries[0].expectedBytes, [try Data(hexString: "40100034"), try Data(hexString: "82000014")])
-        XCTAssertEqual(tip.entries[0].patchBytes, try Data(hexString: "40100034"))
-        XCTAssertEqual(tip.entries[1].expectedBytes, [try Data(hexString: "60E600F9")])
-        XCTAssertEqual(tip.entries[1].patchBytes, try Data(hexString: "7FE600F9"))
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x28b9a4, 0x28dbd0, 0x28dea0, 0x28e2c0,
-            0x298b38, 0x298b40, 0x298b48, 0x298b50
-        ])
-        XCTAssertEqual(update.entries.map(\.expectedBytes), try [
-            "FC6FBBA9", "FFC305D1", "FF4301D1", "F657BDA9",
-            "00604039C0035FD6", "02600039", "00644039C0035FD6", "02640039"
-        ].map { [try Data(hexString: $0)] })
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries.count, 2)
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x4d15438)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "50C002D010FA47F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x4cb1f0c)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "70C302D010FE47F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("270133"))
-    }
-
-    func testBuild270135SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let config = try XCTUnwrap(loadPatchConfigs().first { $0.version == "270135" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertTrue(config.targets.allSatisfy { $0.binary == "Contents/Resources/wechat.dylib" })
-        XCTAssertTrue(config.targets.flatMap(\.entries).allSatisfy { $0.arch == .arm64 })
-
-        let revoke = try XCTUnwrap(config.targets.first { $0.identifier == "revoke" }?.entries.first)
-        XCTAssertEqual(revoke.address, 0x4d1fb48)
-        XCTAssertEqual(revoke.expectedBytes, [try Data(hexString: "40100034")])
-        XCTAssertEqual(revoke.patchBytes, try Data(hexString: "82000014"))
-        let tip = try XCTUnwrap(config.targets.first { $0.identifier == "revoke-tip" })
-        XCTAssertEqual(tip.entries.map(\.address), [0x4d1fb48, 0x4d202e8])
-        XCTAssertEqual(tip.entries[0].expectedBytes, [try Data(hexString: "40100034"), try Data(hexString: "82000014")])
-        XCTAssertEqual(tip.entries[0].patchBytes, try Data(hexString: "40100034"))
-        XCTAssertEqual(tip.entries[1].expectedBytes, [try Data(hexString: "60E600F9")])
-        XCTAssertEqual(tip.entries[1].patchBytes, try Data(hexString: "7FE600F9"))
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x28d9f0, 0x28fc1c, 0x28feec, 0x29030c,
-            0x29ab8c, 0x29ab94, 0x29ab9c, 0x29aba4
-        ])
-        XCTAssertEqual(update.entries.map(\.expectedBytes), try [
-            "FC6FBBA9", "FFC305D1", "FF4301D1", "F657BDA9",
-            "00604039C0035FD6", "02600039", "00644039C0035FD6", "02640039"
-        ].map { [try Data(hexString: $0)] })
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries.count, 2)
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x4d1f8d8)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "70C0029010FA47F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x4cbc3ac)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "70C302F010FE47F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("270135"))
-    }
-
-    func testBuild270352SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let config = try XCTUnwrap(loadPatchConfigs().first { $0.version == "270352" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertTrue(config.targets.allSatisfy { $0.binary == "Contents/Resources/wechat.dylib" })
-        XCTAssertTrue(config.targets.flatMap(\.entries).allSatisfy { $0.arch == .arm64 })
-
-        let revoke = try XCTUnwrap(config.targets.first { $0.identifier == "revoke" }?.entries.first)
-        XCTAssertEqual(revoke.address, 0x4e7d74c)
-        XCTAssertEqual(revoke.expectedBytes, [try Data(hexString: "40100034")])
-        XCTAssertEqual(revoke.patchBytes, try Data(hexString: "82000014"))
-        let tip = try XCTUnwrap(config.targets.first { $0.identifier == "revoke-tip" })
-        XCTAssertEqual(tip.entries.map(\.address), [0x4e7d74c, 0x4e7deec])
-        XCTAssertEqual(tip.entries[0].expectedBytes, [try Data(hexString: "40100034"), try Data(hexString: "82000014")])
-        XCTAssertEqual(tip.entries[0].patchBytes, try Data(hexString: "40100034"))
-        XCTAssertEqual(tip.entries[1].expectedBytes, [try Data(hexString: "60E600F9")])
-        XCTAssertEqual(tip.entries[1].patchBytes, try Data(hexString: "7FE600F9"))
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x292de4, 0x294f1c, 0x2951e0, 0x2955c0,
-            0x29f92c, 0x29f934, 0x29f93c, 0x29f944
-        ])
-        XCTAssertEqual(update.entries.map(\.expectedBytes), try [
-            "FC6FBBA9", "FFC305D1", "FF4301D1", "F657BDA9",
-            "00604039C0035FD6", "02600039", "00644039C0035FD6", "02640039"
-        ].map { [try Data(hexString: $0)] })
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries.count, 2)
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x4e7d4dc)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "70C002D010FA47F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x4e1a094)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "90C302B010FE47F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("270352"))
-    }
-
-    func testBuild270390SupportsInlineHookRecallPatchesAndUpdateBlock() throws {
-        let config = try XCTUnwrap(loadPatchConfigs().first { $0.version == "270390" })
-
-        XCTAssertEqual(config.targets.map(\.identifier), ["revoke", "revoke-tip", "update", "runtime-tip"])
-        XCTAssertTrue(config.targets.allSatisfy { $0.binary == "Contents/Resources/wechat.dylib" })
-        XCTAssertTrue(config.targets.flatMap(\.entries).allSatisfy { $0.arch == .arm64 })
-
-        let revoke = try XCTUnwrap(config.targets.first { $0.identifier == "revoke" }?.entries.first)
-        XCTAssertEqual(revoke.address, 0x461413c)
-        XCTAssertEqual(revoke.expectedBytes, [try Data(hexString: "40100034")])
-        XCTAssertEqual(revoke.patchBytes, try Data(hexString: "82000014"))
-        let tip = try XCTUnwrap(config.targets.first { $0.identifier == "revoke-tip" })
-        XCTAssertEqual(tip.entries.map(\.address), [0x461413c, 0x4614904])
-        XCTAssertEqual(tip.entries[0].expectedBytes, [try Data(hexString: "40100034"), try Data(hexString: "82000014")])
-        XCTAssertEqual(tip.entries[0].patchBytes, try Data(hexString: "40100034"))
-        XCTAssertEqual(tip.entries[1].expectedBytes, [try Data(hexString: "60E600F9")])
-        XCTAssertEqual(tip.entries[1].patchBytes, try Data(hexString: "7FE600F9"))
-
-        let update = try XCTUnwrap(config.targets.first { $0.identifier == "update" })
-        XCTAssertEqual(update.entries.map(\.address), [
-            0x2827c8, 0x2849ec, 0x284cbc, 0x2850dc,
-            0x28f91c, 0x28f924, 0x28f92c, 0x28f934
-        ])
-        XCTAssertEqual(update.entries.map(\.expectedBytes), try [
-            "FC6FBBA9", "FFC305D1", "FF4301D1", "F657BDA9",
-            "00604039C0035FD6", "02600039", "00644039C0035FD6", "02640039"
-        ].map { [try Data(hexString: $0)] })
-        XCTAssertTrue(update.entries.allSatisfy { $0.patchBytes.suffix(4) == (try! Data(hexString: "C0035FD6")) })
-
-        let runtimeTip = try XCTUnwrap(config.targets.first { $0.identifier == "runtime-tip" })
-        XCTAssertEqual(runtimeTip.entries.count, 2)
-        XCTAssertEqual(runtimeTip.entries[0].address, 0x4613ec4)
-        XCTAssertEqual(runtimeTip.entries[0].expectedBytes, [try Data(hexString: "F85FBCA9F65701A9F44F02A9")])
-        XCTAssertEqual(runtimeTip.entries[0].patchBytes, try Data(hexString: "F0C0029010FA47F900021FD6"))
-        XCTAssertEqual(runtimeTip.entries[1].address, 0x45c0b2c)
-        XCTAssertEqual(runtimeTip.entries[1].expectedBytes, [try Data(hexString: "086049391F0500712008407A")])
-        XCTAssertEqual(runtimeTip.entries[1].patchBytes, try Data(hexString: "70C302F010FE47F900021FD6"))
-        XCTAssertTrue(RuntimeTipInstaller.supportedBuildVersions.contains("270390"))
-    }
-
-    private func loadPatchConfigs() throws -> [VersionConfig] {
-        let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+/// This fork ships a deliberately small build matrix and one patch target. Guard that
+/// invariant so a future regeneration of patches.json cannot silently reintroduce
+/// other builds/features.
+final class SilentOnlyPatchConfigTests: XCTestCase {
+    private var catalogURL: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // Tests/WeChatAntiRecallTests
+            .deletingLastPathComponent()   // Tests
+            .deletingLastPathComponent()   // repo root
             .appendingPathComponent("patches.json")
-        let data = try Data(contentsOf: url)
-        return try JSONDecoder().decode([VersionConfig].self, from: data)
+    }
+
+    func testCatalogHasOnlySupportedBuilds() throws {
+        let configs = try JSONDecoder().decode([VersionConfig].self, from: Data(contentsOf: catalogURL))
+        XCTAssertEqual(configs.map(\.version), ["270390", "270416"])
+    }
+
+    func testEachBuildContainsOnlyRevokeEntry() throws {
+        let configs = try JSONDecoder().decode([VersionConfig].self, from: Data(contentsOf: catalogURL))
+        let expected: [String: UInt64] = ["270390": 0x461413c, "270416": 0x4666e98]
+
+        for config in configs {
+            XCTAssertNotNil(expected[config.version])
+            let identifiers = config.targets.map(\.identifier)
+            XCTAssertTrue(identifiers.contains("revoke"))
+            // The native recall notice needs a second, version-specific field write.
+            XCTAssertEqual(identifiers.contains("revoke-tip"), config.version == "270390")
+
+            let target = try XCTUnwrap(config.targets.first(where: { $0.identifier == "revoke" }))
+            XCTAssertEqual(target.binaryPath, "Contents/Resources/wechat.dylib")
+            XCTAssertEqual(target.entries.count, 1)
+
+            let entry = try XCTUnwrap(target.entries.first)
+            XCTAssertEqual(entry.arch, .arm64)
+            XCTAssertEqual(entry.address, expected[config.version])
+            XCTAssertEqual(entry.expectedBytes.map(\.hexString), ["40100034"])
+            XCTAssertEqual(entry.patchBytes.hexString, "82000014")
+        }
+    }
+}
+
+/// The channel check must never reject the ad-hoc signature that this tool itself
+/// produces. Regression test for the "检测失败" loop seen after a successful install:
+/// the old check treated Signature=adhoc (and a missing Developer ID Authority) as an
+/// App Store build, so every post-install dry-run failed even though the patch was live.
+final class AppSignaturePolicyTests: XCTestCase {
+    private let pristineOfficialDMG = """
+        Executable=/Applications/WeChat.app/Contents/MacOS/WeChat
+        Identifier=com.tencent.xinWeChat
+        CodeDirectory v=20500 size=886 flags=0x10000(runtime) hashes=17+7 location=embedded
+        Authority=Developer ID Application: Tencent Technology (Shenzhen) Company Limited (5A4RE8SF68)
+        Authority=Developer ID Certification Authority
+        Authority=Apple Root CA
+        TeamIdentifier=5A4RE8SF68
+        """
+
+    private let installedAdHoc = """
+        Executable=/Applications/WeChat.app/Contents/MacOS/WeChat
+        Identifier=com.tencent.xinWeChat
+        CodeDirectory v=20500 size=886 flags=0x10002(adhoc,runtime) hashes=17+7 location=embedded
+        Signature=adhoc
+        Info.plist entries=43
+        TeamIdentifier=not set
+        """
+
+    private let appStore = """
+        Authority=Software Signing
+        Authority=Apple Code Signing Certification Authority
+        Authority=Apple Root CA
+        TeamIdentifier=5A4RE8SF68
+        """
+
+    func testPristineOfficialDMGIsPatchable() {
+        XCTAssertEqual(
+            AppSignaturePolicy.classify(hasMASReceipt: false, codesignInfo: pristineOfficialDMG),
+            .patchable
+        )
+    }
+
+    func testOwnAdHocResignIsPatchable() {
+        XCTAssertEqual(
+            AppSignaturePolicy.classify(hasMASReceipt: false, codesignInfo: installedAdHoc),
+            .patchable
+        )
+    }
+
+    func testMASReceiptIsRejectedEvenWhenAdHoc() {
+        // An App Store build re-signed by an older tool loses its Authority but keeps
+        // its receipt; the receipt must still block it.
+        guard case .appStoreChannel = AppSignaturePolicy.classify(
+            hasMASReceipt: true, codesignInfo: installedAdHoc
+        ) else {
+            return XCTFail("expected appStoreChannel")
+        }
+    }
+
+    func testSoftwareSigningIsRejected() {
+        guard case .appStoreChannel = AppSignaturePolicy.classify(
+            hasMASReceipt: false, codesignInfo: appStore
+        ) else {
+            return XCTFail("expected appStoreChannel")
+        }
+    }
+
+    func testAppleChainWithoutDeveloperIDIsRejected() {
+        let info = "Authority=Apple Code Signing Certification Authority\nAuthority=Apple Root CA\n"
+        guard case .appStoreChannel = AppSignaturePolicy.classify(
+            hasMASReceipt: false, codesignInfo: info
+        ) else {
+            return XCTFail("expected appStoreChannel")
+        }
+    }
+
+    func testSoftwareSigningCannotBeMaskedByDeveloperIDLine() {
+        let mixed = appStore + "\nAuthority=Developer ID Application: Tencent ...\n"
+        XCTAssertEqual(
+            AppSignaturePolicy.classify(hasMASReceipt: false, codesignInfo: mixed),
+            .appStoreChannel(reason: "当前签名是 Apple Software Signing（App Store 版本），不是官网 Developer ID 版")
+        )
+    }
+}
+
+/// The two modes are mutually exclusive: both touch the parser entry, so installing
+/// both would be order-dependent. Guard the upstream-verified 270390 tip bytes too.
+final class RevokeTipConfigTests: XCTestCase {
+    private var catalogURL: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("patches.json")
+    }
+
+    func testTipTargetBytesMatchUpstream270390Record() throws {
+        let configs = try JSONDecoder().decode([VersionConfig].self, from: Data(contentsOf: catalogURL))
+        let build = try XCTUnwrap(configs.first(where: { $0.version == "270390" }))
+        let tip = try XCTUnwrap(build.targets.first(where: { $0.identifier == "revoke-tip" }))
+        XCTAssertEqual(tip.binaryPath, "Contents/Resources/wechat.dylib")
+        XCTAssertEqual(tip.entries.count, 2)
+
+        let restore = try XCTUnwrap(tip.entries.first)
+        XCTAssertEqual(restore.address, 0x461413c)
+        XCTAssertEqual(restore.expectedBytes.map(\.hexString), ["40100034", "82000014"])
+        XCTAssertEqual(restore.patchBytes.hexString, "40100034")
+
+        let field = try XCTUnwrap(tip.entries.last)
+        XCTAssertEqual(field.address, 0x4614904)
+        XCTAssertEqual(field.expectedBytes.map(\.hexString), ["60E600F9", "7FE600F9"])
+        XCTAssertEqual(field.patchBytes.hexString, "7FE600F9")
+    }
+
+    func testTipAndSilentModesAreMutuallyExclusive() throws {
+        let configs = try JSONDecoder().decode([VersionConfig].self, from: Data(contentsOf: catalogURL))
+        let build = try XCTUnwrap(configs.first(where: { $0.version == "270390" }))
+        let silent = try XCTUnwrap(build.targets.first(where: { $0.identifier == "revoke" }))
+        let tip = try XCTUnwrap(build.targets.first(where: { $0.identifier == "revoke-tip" }))
+        XCTAssertEqual(silent.entries.map(\.address), [0x461413c])
+        XCTAssertEqual(tip.entries.map(\.address), [0x461413c, 0x4614904])
+        XCTAssertNotEqual(silent.entries[0].patchBytes, tip.entries[0].patchBytes)
     }
 }

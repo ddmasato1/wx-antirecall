@@ -1,7 +1,7 @@
 #!/bin/bash
-# Writes patches.json.sha256 next to patches.json. Commit BOTH so the GUI's
-# "拉取最新补丁数据" can verify integrity (it fetches patches.json.sha256 from main and
-# rejects a mismatch). Run this whenever patches.json changes.
+# Writes patches.json.sha256 next to patches.json. This fork has no OTA catalog, but the
+# checksum is kept so the single-build catalog stays verifiable. Run this whenever
+# patches.json changes.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HASH="$(shasum -a 256 "$ROOT/patches.json" | awk '{print $1}')"

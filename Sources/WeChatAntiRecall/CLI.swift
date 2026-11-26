@@ -28,6 +28,7 @@ enum ToolError: LocalizedError {
     case permissionDenied(path: String, operation: String)
     case fileOperationFailed(operation: String, path: String, underlying: String)
     case appIsRunning(path: String, pids: [String])
+    case unsupportedAppSignature(path: String, reason: String)
 
     var errorDescription: String? {
         switch self {
@@ -63,9 +64,11 @@ enum ToolError: LocalizedError {
         case .permissionDenied(let path, let operation):
             return """
             没有权限\(operation)：\(path)
-            当前有效用户 ID：\(geteuid())。安装到 /Applications/WeChat.app 通常需要管理员权限。请先构建 release 版本，再用 sudo 运行安装或恢复命令，例如：
-              swift build -c release
-              sudo .build/release/wechat-antirecall install --with-tip --app /Applications/WeChat.app
+            当前有效用户 ID：\(geteuid())，真实用户 ID：\(getuid())。
+            如果有效用户 ID 为 0 仍报此错，说明系统（TCC / App Management）拦截了写操作：
+            请在「系统设置 → 隐私与安全性」中给「微信防撤回」开启 App Management，
+            必要时同时开启 Full Disk Access，然后完全退出并重新打开「微信防撤回」再试。
+            命令行用户请用 sudo 运行，并给所用终端开启上述权限。
             """
         case .fileOperationFailed(let operation, let path, let underlying):
             return """
@@ -78,6 +81,19 @@ enum ToolError: LocalizedError {
             WeChat 仍在运行，不能在运行中修改或恢复 app bundle：\(path)
             正在运行的进程 PID：\(pids.joined(separator: ", "))
             请先完全退出微信，再重新运行命令。运行中修改二进制可能触发 macOS Code Signature Invalid 崩溃。
+            """
+        case .unsupportedAppSignature(let path, let reason):
+            return """
+            拒绝修改这个微信副本：\(path)
+            原因：\(reason)
+
+            App Store 渠道的微信由 Apple 的 "Software Signing" 身份签名，bundle 内含
+            Contents/_MASReceipt/receipt；本工具只能做 ad-hoc 重签名，会破坏它并导致微信无法启动。
+            正确做法：完全退出并卸载微信，从微信官网 https://weixin.qq.com/ 下载官方 dmg
+            重新安装（4.2.0.54 / 构建号 270390），再用本工具开启。
+
+            注意：本工具成功开启后，微信本身就会变成 ad-hoc 签名、TeamIdentifier 为空，
+            这是正常的安装结果，不是错误；请勿因此重复卸载重装。
             """
         }
     }
@@ -173,418 +189,7 @@ struct PatchReport {
     let status: PatchStatus
 }
 
-enum DylibInjectionStatus: Equatable {
-    case injected
-    case wouldInject
-    case alreadyInjected
-}
 
-struct DylibInjectionReport {
-    let arch: CPUArch
-    let installName: String
-    let commandOffset: UInt64
-    let paddingLeft: UInt64
-    let status: DylibInjectionStatus
-}
-
-struct RecallTipPhrase: Equatable {
-    static let defaultText = "已拦截一条撤回消息"
-    static let maximumLength = 120
-
-    let text: String
-
-    init(_ value: String) throws {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw RecallTipPhraseError.empty
-        }
-        guard !trimmed.contains(where: \.isNewline) else {
-            throw RecallTipPhraseError.containsNewline
-        }
-        guard !trimmed.contains("]]>") else {
-            throw RecallTipPhraseError.containsCDATAEndMarker
-        }
-        guard trimmed.count <= Self.maximumLength else {
-            throw RecallTipPhraseError.tooLong(maximumLength: Self.maximumLength)
-        }
-
-        text = trimmed
-    }
-
-    static var `default`: RecallTipPhrase {
-        try! RecallTipPhrase(defaultText)
-    }
-
-    func rendered(
-        senderName: String?,
-        messageContent: String? = nil,
-        timestamp: Date = Date(),
-        timeZone: TimeZone = .current
-    ) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "HH:mm"
-
-        return text
-            .replacingOccurrences(of: "{from}", with: senderName ?? "")
-            .replacingOccurrences(of: "{time}", with: formatter.string(from: timestamp))
-            .replacingOccurrences(of: "{content}", with: messageContent ?? "")
-    }
-}
-
-enum RecallTipPhraseError: LocalizedError, Equatable {
-    case empty
-    case containsNewline
-    case containsCDATAEndMarker
-    case tooLong(maximumLength: Int)
-
-    var errorDescription: String? {
-        switch self {
-        case .empty:
-            return "撤回提示短语不能为空"
-        case .containsNewline:
-            return "撤回提示短语不能包含换行"
-        case .containsCDATAEndMarker:
-            return "撤回提示短语不能包含 CDATA 结束标记"
-        case .tooLong(let maximumLength):
-            return "撤回提示短语不能超过 \(maximumLength) 个字符"
-        }
-    }
-}
-
-struct RecallTipPreview {
-    static let fixedPrefix = "WeChat Anti-Recall"
-
-    // Message kinds whose recalled content is shown as raw text. Anything else (image,
-    // voice, …) is previewed as a "[type]" placeholder, mirroring the runtime's
-    // messageKindPlaceholder behavior.
-    static let textualMessageKinds: Set<String> = ["文本消息", "文本", "text", "Text"]
-
-    let phrase: RecallTipPhrase
-    let senderName: String?
-    let messageKind: String
-    let messageText: String
-    let timestamp: Date
-    let timeZone: TimeZone
-
-    // What {content} renders to in the preview: the raw text for text messages, a
-    // "[type]" placeholder for media.
-    var previewContent: String {
-        Self.textualMessageKinds.contains(messageKind) ? messageText : "[\(messageKind)]"
-    }
-
-    func render() -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-
-        return """
-        [\(Self.fixedPrefix)] \(phrase.rendered(senderName: senderName, messageContent: previewContent, timestamp: timestamp, timeZone: timeZone))
-        [\(messageKind)]\(messageText)
-        \(formatter.string(from: timestamp))
-        """
-    }
-}
-
-enum RecallTipPhraseAction: Equatable {
-    case get
-    case set(RecallTipPhrase)
-    case reset
-    case preview(phrase: RecallTipPhrase, senderName: String?, messageKind: String, messageText: String)
-    case probe(RecallTipProbeAction)
-}
-
-enum RecallTipProbeAction: Equatable {
-    case get
-    case set(Bool)
-}
-
-struct RecallTipPhraseOptions {
-    let action: RecallTipPhraseAction
-    let appPath: String?
-
-    init(_ arguments: [String]) throws {
-        let extracted = try Self.extractAppPath(from: arguments)
-        appPath = extracted.appPath
-
-        var parser = ArgumentCursor(extracted.arguments)
-        guard let command = parser.next() else {
-            throw ToolError.usage("tip-phrase 需要 get、set、reset、preview 或 probe")
-        }
-
-        switch command {
-        case "get":
-            guard parser.next() == nil else {
-                throw ToolError.usage("tip-phrase get 不接受额外参数")
-            }
-            action = .get
-        case "set":
-            let phrase = try RecallTipPhrase(parser.requiredValue(after: "set"))
-            guard parser.next() == nil else {
-                throw ToolError.usage("tip-phrase set 只接受一个短语")
-            }
-            action = .set(phrase)
-        case "reset":
-            guard parser.next() == nil else {
-                throw ToolError.usage("tip-phrase reset 不接受额外参数")
-            }
-            action = .reset
-        case "preview":
-            guard appPath == nil else {
-                throw ToolError.usage("tip-phrase preview 不接受 --app；预览与目标 App 无关")
-            }
-            let phrase = try RecallTipPhrase(parser.requiredValue(after: "preview"))
-            var senderName: String?
-            var messageKind = "文本消息"
-            var messageText = "这是一条示例消息"
-
-            while let argument = parser.next() {
-                switch argument {
-                case "--from":
-                    senderName = try parser.requiredValue(after: argument)
-                case "--type":
-                    messageKind = try parser.requiredValue(after: argument)
-                case "--message":
-                    messageText = try parser.requiredValue(after: argument)
-                default:
-                    throw ToolError.usage("未知参数：\(argument)")
-                }
-            }
-
-            action = .preview(
-                phrase: phrase,
-                senderName: senderName,
-                messageKind: messageKind,
-                messageText: messageText
-            )
-        case "probe":
-            guard let probeCommand = parser.next() else {
-                throw ToolError.usage("tip-phrase probe 需要 get、on 或 off")
-            }
-            guard parser.next() == nil else {
-                throw ToolError.usage("tip-phrase probe 不接受额外参数")
-            }
-
-            switch probeCommand {
-            case "get":
-                action = .probe(.get)
-            case "on":
-                action = .probe(.set(true))
-            case "off":
-                action = .probe(.set(false))
-            default:
-                throw ToolError.usage("未知 tip-phrase probe 命令：\(probeCommand)")
-            }
-        default:
-            throw ToolError.usage("未知 tip-phrase 命令：\(command)")
-        }
-    }
-
-    private static func extractAppPath(from arguments: [String]) throws -> (arguments: [String], appPath: String?) {
-        var filtered: [String] = []
-        var appPath: String?
-        var index = 0
-
-        while index < arguments.count {
-            let argument = arguments[index]
-            if argument == "--app" {
-                guard appPath == nil else {
-                    throw ToolError.usage("tip-phrase --app 只能指定一次")
-                }
-                index += 1
-                guard index < arguments.count, !arguments[index].hasPrefix("--") else {
-                    throw ToolError.usage("--app 需要一个值")
-                }
-                appPath = arguments[index]
-            } else {
-                filtered.append(argument)
-            }
-            index += 1
-        }
-
-        return (filtered, appPath)
-    }
-}
-
-struct RecallTipPreferenceStore {
-    static let domain = "com.tencent.xinWeChat"
-    static let key = "WeChatAntiRecall_RevokeTipPhrase"
-    static let probeKey = "WeChatAntiRecall_RevokeTipDebugProbe"
-
-    let preferenceFileURL: URL
-    let domain: String
-
-    private let usesSystemPreferences: Bool
-
-    var preferenceLocationDescription: String {
-        usesSystemPreferences ? "CFPreferences domain \(domain)" : preferenceFileURL.path
-    }
-
-    init(
-        homeDirectory: URL? = nil,
-        domain: String = RecallTipPreferenceStore.domain
-    ) {
-        let resolvedHomeDirectory = homeDirectory ?? RecallTipPreferenceStore.defaultHomeDirectory()
-        self.domain = domain
-        usesSystemPreferences = homeDirectory == nil
-        preferenceFileURL = resolvedHomeDirectory
-            .appendingPathComponent("Library/Containers/\(domain)/Data/Library/Preferences")
-            .appendingPathComponent("\(domain).plist")
-    }
-
-    func load() throws -> RecallTipPhrase? {
-        guard let value = try preferenceValue(forKey: Self.key) as? String else {
-            return nil
-        }
-        return try RecallTipPhrase(value)
-    }
-
-    func save(_ phrase: RecallTipPhrase) throws {
-        try setPreferenceValue(phrase.text, forKey: Self.key)
-    }
-
-    func reset() throws {
-        guard try preferenceValue(forKey: Self.key) != nil else { return }
-        try setPreferenceValue(nil, forKey: Self.key)
-        if usesSystemPreferences {
-            try removeLegacyPreferenceValue(forKey: Self.key)
-        }
-    }
-
-    func isProbeEnabled() throws -> Bool {
-        try preferenceValue(forKey: Self.probeKey) as? Bool ?? false
-    }
-
-    func setProbeEnabled(_ enabled: Bool) throws {
-        try setPreferenceValue(enabled, forKey: Self.probeKey)
-    }
-
-    func preferenceValue(forKey key: String) throws -> Any? {
-        if usesSystemPreferences {
-            try synchronizeSystemPreferences()
-            let value = CFPreferencesCopyValue(
-                key as CFString,
-                domain as CFString,
-                kCFPreferencesCurrentUser,
-                kCFPreferencesAnyHost
-            )
-            // Releases prior to this fix wrote the container plist directly. Keep reading
-            // that value as a migration fallback, but all new writes go through cfprefsd.
-            if let value { return value }
-            return try readPreferences()[key]
-        }
-
-        return try readPreferences()[key]
-    }
-
-    func setPreferenceValue(_ value: Any?, forKey key: String) throws {
-        if usesSystemPreferences {
-            try requireUserContext()
-            CFPreferencesSetValue(
-                key as CFString,
-                value as CFPropertyList?,
-                domain as CFString,
-                kCFPreferencesCurrentUser,
-                kCFPreferencesAnyHost
-            )
-            try synchronizeSystemPreferences()
-            return
-        }
-
-        var preferences = try readPreferences()
-        if let value {
-            preferences[key] = value
-        } else {
-            preferences.removeValue(forKey: key)
-        }
-        try writePreferences(preferences)
-    }
-
-    private func removeLegacyPreferenceValue(forKey key: String) throws {
-        guard FileManager.default.fileExists(atPath: preferenceFileURL.path) else { return }
-        var preferences = try readPreferences()
-        guard preferences.removeValue(forKey: key) != nil else { return }
-        try writePreferences(preferences)
-    }
-
-    // cfprefsd only redirects a sandboxed app's domain to its container for the calling
-    // user; under sudo the request would go to root's cfprefsd instead.
-    private func requireUserContext() throws {
-        if geteuid() == 0,
-           let sudoUser = ProcessInfo.processInfo.environment["SUDO_USER"],
-           sudoUser != "root" {
-            throw ToolError.usage("微信偏好设置需以当前用户身份修改，请不要使用 sudo 运行此命令。")
-        }
-    }
-
-    private func synchronizeSystemPreferences() throws {
-        try requireUserContext()
-        guard CFPreferencesSynchronize(
-            domain as CFString,
-            kCFPreferencesCurrentUser,
-            kCFPreferencesAnyHost
-        ) else {
-            throw ToolError.fileOperationFailed(
-                operation: "同步微信偏好设置",
-                path: domain,
-                underlying: "CFPreferencesSynchronize returned false"
-            )
-        }
-    }
-
-    private func readPreferences() throws -> [String: Any] {
-        guard FileManager.default.fileExists(atPath: preferenceFileURL.path) else {
-            return [:]
-        }
-
-        let data = try Data(contentsOf: preferenceFileURL)
-        guard !data.isEmpty else {
-            return [:]
-        }
-
-        var format = PropertyListSerialization.PropertyListFormat.binary
-        guard let preferences = try PropertyListSerialization.propertyList(
-            from: data,
-            options: [.mutableContainersAndLeaves],
-            format: &format
-        ) as? [String: Any] else {
-            throw ToolError.fileOperationFailed(
-                operation: "读取撤回提示短语配置",
-                path: preferenceFileURL.path,
-                underlying: "plist root is not a dictionary"
-            )
-        }
-
-        return preferences
-    }
-
-    private func writePreferences(_ preferences: [String: Any]) throws {
-        try FileManager.default.createDirectory(
-            at: preferenceFileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-
-        let data = try PropertyListSerialization.data(
-            fromPropertyList: preferences,
-            format: .binary,
-            options: 0
-        )
-        try data.write(to: preferenceFileURL, options: .atomic)
-    }
-
-    static func defaultHomeDirectory() -> URL {
-        if geteuid() == 0,
-           let sudoUser = ProcessInfo.processInfo.environment["SUDO_USER"],
-           sudoUser != "root",
-           let passwd = getpwnam(sudoUser) {
-            return URL(fileURLWithPath: String(cString: passwd.pointee.pw_dir), isDirectory: true)
-        }
-
-        return FileManager.default.homeDirectoryForCurrentUser
-    }
-}
 
 @main
 struct WeChatAntiRecall {
@@ -594,8 +199,7 @@ struct WeChatAntiRecall {
             try CLI().run(arguments: arguments)
         } catch {
             // In --json mode, emit a structured error envelope to stdout (still exit 1) so
-            // the GUI has one machine-readable channel for both success and failure. Without
-            // --json, keep the original human stderr line for backward compatibility.
+            // the GUI has one machine-readable channel for both success and failure.
             if arguments.contains("--json") {
                 JSONOutput.emit(ErrorEnvelope(error))
             } else {
@@ -619,56 +223,12 @@ struct CLI {
             try versions(rest)
         case "install", "patch":
             try install(rest)
-        case "clone":
-            try clone(rest)
         case "restore":
             try restore(rest)
-        case "tip-phrase":
-            try tipPhrase(rest)
-        case "red-packet":
-            try redPacket(rest)
-        case "recall-log":
-            try recallLog(rest)
-        case "keyword-alert":
-            try keywordAlert(rest)
-        case "window-privacy":
-            try windowPrivacy(rest)
         case "help", "--help", "-h":
             printUsage()
         default:
-            throw ToolError.usage("未知命令：\(command)。运行 `wechat-antirecall help` 查看用法。")
-        }
-    }
-
-    private func clone(_ arguments: [String]) throws {
-        let options = try CloneOptions(arguments)
-        let appInfo = try readAppInfo(appPath: options.appPath)
-        let specs = try WeChatCloneInstaller().install(appInfo: appInfo, options: options)
-
-        if options.json {
-            JSONOutput.emit(CloneReport(
-                schemaVersion: jsonSchemaVersion,
-                dryRun: options.dryRun,
-                app: AppInfoDTO(appInfo),
-                keepURLSchemes: options.keepURLSchemes,
-                clones: specs.map(CloneReport.CloneSpecDTO.init)
-            ))
-            return
-        }
-
-        print("WeChat: \(appInfo.shortVersion) (\(appInfo.buildVersion))")
-        print(options.dryRun ? "Mode: dry-run (clone app bundle)" : "Mode: clone app bundle")
-        print("Source: \(appInfo.appURL.path)")
-        for spec in specs {
-            print("Clone \(spec.index): \(spec.destinationURL.path)")
-            print("  Bundle: \(spec.bundleIdentifier)")
-            print(options.keepURLSchemes ? "  URL schemes: preserved" : "  URL schemes: removed")
-        }
-
-        if options.dryRun {
-            print("Dry-run complete. No files were changed.")
-        } else {
-            print("Clone complete.")
+            throw ToolError.usage("未知命令：\(command)。本精简版仅支持 versions、install、restore。运行 `wechat-antirecall help` 查看用法。")
         }
     }
 
@@ -686,23 +246,10 @@ struct CLI {
         print("Bundle: \(appInfo.bundleIdentifier)")
         print("Executable: \(appInfo.executableURL.path)")
         print("")
-        print("Supported patch versions:")
-
+        print("Supported patch targets:")
         for config in configs {
-            let targets = config.targets
-                .map { target in
-                    let arches = target.entries.reduce(into: [String]()) { result, entry in
-                        let arch = entry.arch.rawValue
-                        if !result.contains(arch) {
-                            result.append(arch)
-                        }
-                    }.joined(separator: "/")
-                    return "\(target.identifier): \(target.binaryPath) [\(arches)]"
-                }
-                .joined(separator: ", ")
-            print("- \(config.version): \(targets)")
+            print("- \(config.version): \(config.targets.map(\.identifier).joined(separator: ", "))")
         }
-
         if configs.contains(where: { $0.version == appInfo.buildVersion }) {
             print("")
             print("Status: current WeChat build is supported.")
@@ -716,23 +263,18 @@ struct CLI {
         let options = try InstallOptions(arguments)
         let configs = try loadConfigs(path: options.configPath)
         let appInfo = try readAppInfo(appPath: options.appPath)
+        try validateAppSignatureIsPatchable(appURL: appInfo.appURL)
         let config = try configForInstalledApp(appInfo, configs: configs)
-        let selectedTargets = try resolveTargets(config: config, options: options)
-        let targets = selectedTargets.map(\.target)
-        let runtimeInstaller = options.runtimeTip ? try RuntimeTipInstaller(appInfo: appInfo, options: options) : nil
+        let targetIdentifier = options.withTip ? "revoke-tip" : "revoke"
+        guard let target = config.targets.first(where: { $0.identifier == targetIdentifier }) else {
+            throw ToolError.invalidConfig("构建号 \(config.version) 没有 \(targetIdentifier) 目标；该构建号可能只支持静默防撤回。")
+        }
+        let targets = [target]
+        let modeLabel = options.withTip ? "patch with recall tip" : "patch silent"
+        let modeComponents = [modeLabel]
         var patchedBinaries: [URL] = []
         var backedUpBinaryPaths = Set<String>()
-
-        // JSON mode accumulators. In --json mode we suppress the human-readable prints and
-        // emit a single structured InstallReport at the exit point instead.
-        var jsonRuntimeReports: [InstallReport.RuntimeReportDTO] = []
         var jsonTargetReports: [InstallReport.TargetReportDTO] = []
-
-        var modeComponents = selectedTargets.map { displayName(forTargetIdentifier: $0.identifier) }
-        if options.runtimeTip {
-            modeComponents.append("custom recall tip phrase runtime")
-        }
-        let modeText = modeComponents.joined(separator: ", ")
 
         func emitInstallJSON(resigned: Bool) {
             JSONOutput.emit(InstallReport(
@@ -741,56 +283,18 @@ struct CLI {
                 resigned: resigned,
                 app: AppInfoDTO(appInfo),
                 mode: modeComponents,
-                runtime: jsonRuntimeReports,
                 targets: jsonTargetReports
             ))
         }
 
         if !options.json {
             print("WeChat: \(appInfo.shortVersion) (\(appInfo.buildVersion))")
-            if options.explicitWithTip && !options.runtimeTip {
-                let runtimeTipSupported = RuntimeTipInstaller.supportedBuildVersions.contains(appInfo.buildVersion)
-                fputs(withTipDeprecationNotice(buildVersion: appInfo.buildVersion, runtimeTipSupported: runtimeTipSupported) + "\n", stderr)
-            }
-            print(options.dryRun ? "Mode: dry-run (\(modeText))" : "Mode: \(modeText)")
+            print(options.dryRun ? "Mode: dry-run (\(modeLabel))" : "Mode: \(modeLabel)")
             print("Checking whether WeChat is running...")
         }
         try ensureAppNotRunning(appInfo: appInfo, dryRun: options.dryRun)
         if !options.json { print("Checking install permissions...") }
-        try validateInstallPermissions(appInfo: appInfo, targets: targets, options: options, runtimeInstaller: runtimeInstaller)
-
-        if let runtimeInstaller {
-            if !options.dryRun && !options.noBackup && backedUpBinaryPaths.insert(runtimeInstaller.hostBinaryURL.standardizedFileURL.path).inserted {
-                if !options.json { print("Creating backup for \(RuntimeTipInstaller.hostBinaryPath)...") }
-                let backupURL = try makeBackup(of: runtimeInstaller.hostBinaryURL)
-                if !options.json { print("Backup: \(backupURL.path)") }
-            }
-
-            if !options.json { print(options.dryRun ? "Checking runtime tip injection..." : "Installing runtime tip support...") }
-            let reports = try runtimeInstaller.install(dryRun: options.dryRun)
-            jsonRuntimeReports = reports.map(InstallReport.RuntimeReportDTO.init)
-            if !options.json {
-                print("Runtime dylib: \(runtimeInstaller.sourceDylibURL.path) -> \(runtimeInstaller.destinationDylibRelativePath)")
-                print("Runtime loader target: \(RuntimeTipInstaller.hostBinaryPath)")
-                for report in reports {
-                    let statusText: String
-                    switch report.status {
-                    case .injected:
-                        statusText = "injected"
-                    case .wouldInject:
-                        statusText = "would inject"
-                    case .alreadyInjected:
-                        statusText = "already injected"
-                    }
-                    print("  - \(report.arch.rawValue) \(report.installName) at file+0x\(String(report.commandOffset, radix: 16)) (\(statusText), padding left: \(report.paddingLeft))")
-                }
-            }
-
-            if !options.dryRun {
-                patchedBinaries.append(runtimeInstaller.hostBinaryURL)
-                patchedBinaries.append(runtimeInstaller.destinationDylibURL)
-            }
-        }
+        try validateInstallPermissions(appInfo: appInfo, targets: targets, options: options)
 
         for target in targets {
             let binaryURL = appInfo.appURL.appendingPathComponent(target.binaryPath)
@@ -816,12 +320,9 @@ struct CLI {
                 for report in reports {
                     let statusText: String
                     switch report.status {
-                    case .patched:
-                        statusText = "patched"
-                    case .wouldPatch:
-                        statusText = "would patch"
-                    case .alreadyPatched:
-                        statusText = "already patched"
+                    case .patched: statusText = "patched"
+                    case .wouldPatch: statusText = "would patch"
+                    case .alreadyPatched: statusText = "already patched"
                     }
                     print("  - \(report.arch.rawValue) 0x\(String(report.address, radix: 16)) -> file+0x\(String(report.fileOffset, radix: 16)) (\(statusText))")
                 }
@@ -851,288 +352,6 @@ struct CLI {
         }
     }
 
-    private func redPacket(_ arguments: [String]) throws {
-        let options = try RedPacketOptions(arguments)
-        let info = try readAppInfo(appPath: options.appPath)
-        let store = RedPacketPreferenceStore(
-            preferences: RecallTipPreferenceStore(domain: info.bundleIdentifier))
-        let runtimeData = try? Data(contentsOf: info.appURL.appendingPathComponent(RuntimeTipInstaller.destinationDylibPath), options: .mappedIfSafe)
-        let runtimeAvailable = runtimeData?.range(of: Data(RedPacketSettings.runtimeMarker.utf8)) != nil
-        var settings = options.enabled == false ? ((try? store.load()) ?? RedPacketSettings()) : try store.load()
-        if let enabled = options.enabled {
-            if enabled && !RedPacketSettings.supportedBuilds.contains(info.buildVersion) {
-                throw ToolError.usage("自动红包暂仅适配微信构建 \(RedPacketSettings.supportedBuilds.sorted().joined(separator: "、"))；当前构建为 \(info.buildVersion)。")
-            }
-            if enabled && !runtimeAvailable {
-                throw ToolError.usage("请先安装或更新包含红包功能的自定义提示运行时，再开启此设置。")
-            }
-            settings.enabled = enabled
-            if let delay = options.delayMilliseconds { settings.delayMilliseconds = delay }
-            if let notifyOnly = options.notifyOnly { settings.notifyOnly = notifyOnly }
-            try store.save(settings)
-        }
-        let report = RedPacketReport(
-            schemaVersion: jsonSchemaVersion, settings: settings,
-            supported: RedPacketSettings.supportedBuilds.contains(info.buildVersion),
-            build: info.buildVersion, runtimeAvailable: runtimeAvailable)
-        if options.json {
-            JSONOutput.emit(report)
-        } else {
-            let modeText = !settings.enabled ? "已关闭"
-                : (settings.notifyOnly ? "已开启（仅提醒）" : "已开启（自动领取）")
-            print("自动红包：\(modeText)")
-            if settings.enabled && !settings.notifyOnly {
-                print("等待时间：\(settings.delayMilliseconds) 毫秒")
-            }
-            print("构建：\(info.buildVersion)（\(report.supported ? "已适配" : "未适配")）")
-            print("需要本版本的自定义提示运行时。更换运行时后请重启微信。")
-        }
-    }
-
-    private func recallLog(_ arguments: [String]) throws {
-        let options = try RecallLogOptions(arguments)
-        let info = try readAppInfo(appPath: options.appPath)
-        let files = RecallLogFileStore(domain: info.bundleIdentifier)
-
-        if options.action == .list {
-            let snapshot = try files.load()
-            let shown = Array(snapshot.entries.prefix(options.limit))
-            if options.json {
-                JSONOutput.emit(RecallLogListReport(
-                    schemaVersion: jsonSchemaVersion, entries: shown,
-                    total: snapshot.entries.count, unreadableLines: snapshot.unreadableLines))
-            } else if shown.isEmpty {
-                print("撤回记录为空。")
-            } else {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-                for entry in shown {
-                    let time = formatter.string(from: Date(timeIntervalSince1970: TimeInterval(entry.loggedAt)))
-                    let content = entry.content.map { "：\($0)" } ?? ""
-                    print("\(time)  \(entry.session)  \(entry.notice)\(content)")
-                }
-                print("共 \(snapshot.entries.count) 条，显示 \(shown.count) 条。")
-            }
-            return
-        }
-
-        let store = RecallLogPreferenceStore(
-            preferences: RecallTipPreferenceStore(domain: info.bundleIdentifier))
-        let runtimeData = try? Data(
-            contentsOf: info.appURL.appendingPathComponent(RuntimeTipInstaller.destinationDylibPath),
-            options: .mappedIfSafe)
-        let runtimeAvailable = runtimeData?.range(of: Data(RecallLogSettings.runtimeMarker.utf8)) != nil
-        // Turning the log off must stay possible even when the stored value is damaged.
-        var settings = options.action == .off ? ((try? store.load()) ?? RecallLogSettings()) : try store.load()
-        switch options.action {
-        case .on:
-            guard runtimeAvailable else {
-                throw ToolError.usage("请先安装或更新包含撤回记录的自定义提示运行时，再开启此设置。")
-            }
-            settings.enabled = true
-            try store.save(settings)
-        case .off:
-            settings.enabled = false
-            try store.save(settings)
-        case .clear:
-            let removed = try files.clear()
-            if !options.json { print("已清空 \(removed) 条撤回记录。") }
-        case .get, .list:
-            break
-        }
-
-        // The count is informational; a read failure (no Full Disk Access) must not hide the settings.
-        let entryCount = try? files.load().entries.count
-        if options.json {
-            JSONOutput.emit(RecallLogReport(
-                schemaVersion: jsonSchemaVersion, settings: settings, build: info.buildVersion,
-                runtimeAvailable: runtimeAvailable, entryCount: entryCount))
-        } else if options.action != .clear {
-            print("撤回记录：\(settings.enabled ? "已开启" : "已关闭")")
-            print("记录条数：\(entryCount.map(String.init) ?? "无法读取（可能需要完全磁盘访问权限）")")
-            print("需要本版本的自定义提示运行时。更换运行时后请重启微信。")
-        }
-    }
-
-    private func keywordAlert(_ arguments: [String]) throws {
-        let options = try KeywordAlertOptions(arguments)
-        let info = try readAppInfo(appPath: options.appPath)
-        let store = KeywordAlertPreferenceStore(
-            preferences: RecallTipPreferenceStore(domain: info.bundleIdentifier))
-        let runtimeData = try? Data(
-            contentsOf: info.appURL.appendingPathComponent(RuntimeTipInstaller.destinationDylibPath),
-            options: .mappedIfSafe)
-        let runtimeAvailable = runtimeData?.range(of: Data(KeywordAlertSettings.runtimeMarker.utf8)) != nil
-        let supported = KeywordAlertSettings.supportedBuilds.contains(info.buildVersion)
-        // Turning the alert off must stay possible even when the stored value is damaged.
-        var settings = options.action == .off ? ((try? store.load()) ?? KeywordAlertSettings()) : try store.load()
-        switch options.action {
-        case .get:
-            break
-        case .off:
-            settings.enabled = false
-            try store.save(settings)
-        case .set:
-            settings.keywords = options.keywords ?? []
-            try store.save(settings)
-        case .on:
-            if !supported {
-                throw ToolError.usage("关键词提醒暂仅适配微信构建 \(KeywordAlertSettings.supportedBuilds.sorted().joined(separator: "、"))；当前构建为 \(info.buildVersion)。")
-            }
-            guard runtimeAvailable else {
-                throw ToolError.usage("请先安装或更新包含关键词提醒的自定义提示运行时，再开启此设置。")
-            }
-            if let keywords = options.keywords { settings.keywords = keywords }
-            settings.enabled = true
-            try store.save(settings)
-        }
-        let report = KeywordAlertReport(
-            schemaVersion: jsonSchemaVersion, settings: settings, supported: supported,
-            build: info.buildVersion, runtimeAvailable: runtimeAvailable)
-        if options.json {
-            JSONOutput.emit(report)
-        } else {
-            print("关键词提醒：\(settings.enabled ? "已开启" : "已关闭")")
-            print("关键词：\(settings.keywords.isEmpty ? "（无）" : settings.keywords.joined(separator: "、"))")
-            print("构建：\(info.buildVersion)（\(supported ? "已适配" : "未适配")）")
-            print("需要本版本的自定义提示运行时。更换运行时后请重启微信。")
-        }
-    }
-
-    private func windowPrivacy(_ arguments: [String]) throws {
-        let options = try WindowPrivacyOptions(arguments)
-        let info = try readAppInfo(appPath: options.appPath)
-        let store = WindowPrivacyPreferenceStore(
-            preferences: RecallTipPreferenceStore(domain: info.bundleIdentifier))
-        let runtimeData = try? Data(
-            contentsOf: info.appURL.appendingPathComponent(RuntimeTipInstaller.destinationDylibPath),
-            options: .mappedIfSafe)
-        let runtimeAvailable = runtimeData?.range(of: Data(WindowPrivacySettings.runtimeMarker.utf8)) != nil
-        // Turning the setting off must stay possible even when the stored value is damaged.
-        var settings = options.action == .off ? ((try? store.load()) ?? WindowPrivacySettings()) : try store.load()
-        switch options.action {
-        case .get:
-            break
-        case .off:
-            settings.enabled = false
-            try store.save(settings)
-        case .on:
-            guard runtimeAvailable else {
-                throw ToolError.usage("请先安装或更新包含窗口隐私的自定义提示运行时，再开启此设置。")
-            }
-            settings.enabled = true
-            try store.save(settings)
-        }
-        if options.json {
-            JSONOutput.emit(WindowPrivacyReport(
-                schemaVersion: jsonSchemaVersion, settings: settings,
-                build: info.buildVersion, runtimeAvailable: runtimeAvailable))
-        } else {
-            print("窗口隐私：\(settings.enabled ? "已开启" : "已关闭")")
-            print("构建：\(info.buildVersion)")
-            print("需要本版本的自定义提示运行时。开启或关闭会在半秒内对已打开的微信生效。")
-        }
-    }
-
-    private func tipPhrase(_ arguments: [String]) throws {
-        let options = try RecallTipPhraseOptions(arguments)
-        let domain = try recallTipPreferenceDomain(appPath: options.appPath)
-        let store = RecallTipPreferenceStore(domain: domain)
-
-        switch options.action {
-        case .get:
-            let phrase = try store.load() ?? .default
-            print("Domain: \(domain)")
-            print("Key: \(RecallTipPreferenceStore.key)")
-            print("Preferences: \(store.preferenceLocationDescription)")
-            print("Phrase: \(phrase.text)")
-        case .set(let phrase):
-            try store.save(phrase)
-            print("Saved recall tip phrase.")
-            print("Domain: \(domain)")
-            print("Key: \(RecallTipPreferenceStore.key)")
-            print("Preferences: \(store.preferenceLocationDescription)")
-            printPreview(phrase: phrase, senderName: "张三", messageKind: "文本消息", messageText: "这是一条示例消息")
-        case .reset:
-            try store.reset()
-            print("Reset recall tip phrase to default.")
-            print("Domain: \(domain)")
-            print("Preferences: \(store.preferenceLocationDescription)")
-            printPreview(phrase: .default, senderName: "张三", messageKind: "文本消息", messageText: "这是一条示例消息")
-        case .preview(let phrase, let senderName, let messageKind, let messageText):
-            printPreview(phrase: phrase, senderName: senderName, messageKind: messageKind, messageText: messageText)
-        case .probe(let action):
-            switch action {
-            case .get:
-                print("Debug probe: \(try store.isProbeEnabled() ? "enabled" : "disabled")")
-                print("Domain: \(domain)")
-                print("Preferences: \(store.preferenceLocationDescription)")
-            case .set(let enabled):
-                try store.setProbeEnabled(enabled)
-                print("Debug probe: \(enabled ? "enabled" : "disabled")")
-                print("Domain: \(domain)")
-                print("Preferences: \(store.preferenceLocationDescription)")
-                if enabled {
-                    print("Warning: probe logs revoke metadata and XML previews to macOS Console. Turn it off after collecting evidence.")
-                }
-            }
-        }
-    }
-
-    private func resolveTargets(config: VersionConfig, options: InstallOptions) throws -> [(identifier: String, target: PatchTarget)] {
-        var selected: [(identifier: String, target: PatchTarget)] = []
-
-        if options.updateOnly {
-            guard let updateTarget = config.targets.first(where: { $0.identifier == "update" }) else {
-                throw ToolError.invalidConfig("构建号 \(config.version) 没有 update 目标")
-            }
-            selected.append(("update", updateTarget))
-            return selected
-        }
-
-        if options.withTip {
-            guard let revokeTipTarget = config.targets.first(where: { $0.identifier == "revoke-tip" }) else {
-                throw ToolError.invalidConfig("构建号 \(config.version) 没有 revoke-tip 目标")
-            }
-            selected.append(("revoke-tip", revokeTipTarget))
-        } else if let revokeTarget = config.targets.first(where: { $0.identifier == "revoke" }) {
-            selected.append(("revoke", revokeTarget))
-        } else {
-            throw ToolError.invalidConfig("构建号 \(config.version) 没有 revoke 目标")
-        }
-
-        if options.multiInstance {
-            guard let multiTarget = config.targets.first(where: { $0.identifier == "multiInstance" }) else {
-                throw ToolError.invalidConfig("构建号 \(config.version) 没有 multiInstance 目标")
-            }
-            selected.append(("multiInstance", multiTarget))
-
-            if let multiExtraTarget = config.targets.first(where: { $0.identifier == "multiInstance-extra" }) {
-                selected.append(("multiInstance-extra", multiExtraTarget))
-            }
-        }
-
-        if options.blockUpdate {
-            guard let updateTarget = config.targets.first(where: { $0.identifier == "update" }) else {
-                throw ToolError.invalidConfig("构建号 \(config.version) 没有 update 目标")
-            }
-            selected.append(("update", updateTarget))
-        }
-
-        if options.runtimeTip, let runtimeTipTarget = config.targets.first(where: { $0.identifier == "runtime-tip" }) {
-            // Inline-hook builds (e.g. 268849, whose parseRevokeXML has no WeChat
-            // dispatch stub) need a static entry rewrite that routes the function through
-            // the injected runtime dylib. This target is ONLY ever selected alongside the
-            // dylib (it is gated on options.runtimeTip and RuntimeTipInstaller runs first),
-            // never on its own — otherwise WeChat would jump through an unset slot and
-            // crash on the first revoke. Builds that hook via the native stub do not define
-            // this target, so they are unaffected.
-            selected.append(("runtime-tip", runtimeTipTarget))
-        }
-
-        return selected
-    }
-
     private func restore(_ arguments: [String]) throws {
         let options = try RestoreOptions(arguments)
         let appInfo = try readAppInfo(appPath: options.appPath)
@@ -1159,57 +378,21 @@ struct CLI {
 
     private func printUsage() {
         print("""
-        wechat-antirecall
+        wechat-antirecall (recall-only build: silent / native tip)
 
         Usage:
           wechat-antirecall versions [--app /Applications/WeChat.app] [--config patches.json] [--json]
-          wechat-antirecall install  [--app /Applications/WeChat.app] [--config patches.json] [--with-tip (deprecated, prefer --runtime-tip)] [--runtime-tip] [--runtime-dylib <path>] [--multi-instance] [--block-update] [--update-only] [--dry-run] [--no-backup] [--skip-resign] [--json]
-          wechat-antirecall clone    [--app /Applications/WeChat.app] [--output-dir /Applications] [--count 2] [--name-prefix WeChat] [--keep-url-schemes] [--replace] [--dry-run] [--skip-resign] [--json]
-          wechat-antirecall restore  --backup <path> [--binary Contents/MacOS/WeChat] [--app /Applications/WeChat.app] [--skip-resign]
-          wechat-antirecall tip-phrase get [--app /Applications/WeChat.app]
-          wechat-antirecall tip-phrase set <phrase> [--app /Applications/WeChat.app]
-          wechat-antirecall tip-phrase reset [--app /Applications/WeChat.app]
-          wechat-antirecall tip-phrase preview <phrase> [--from <name>] [--type <kind>] [--message <text>]
-          wechat-antirecall tip-phrase probe get|on|off [--app /Applications/WeChat.app]
-          wechat-antirecall red-packet get|on|off [--notify-only] [--delay-ms 500] [--app /Applications/WeChat.app] [--json]
-          red-packet on --notify-only switches to notify-only mode: a red packet only
-          raises a macOS notification (including muted chats) and is never opened.
-          wechat-antirecall recall-log get|on|off|clear [--app /Applications/WeChat.app] [--json]
-          wechat-antirecall recall-log list [--limit 200] [--app /Applications/WeChat.app] [--json]
-          wechat-antirecall keyword-alert get|off [--app /Applications/WeChat.app] [--json]
-          wechat-antirecall keyword-alert on|set [--keyword <word>]... [--app /Applications/WeChat.app] [--json]
-          keyword-alert on raises a macOS notification for an incoming text message that contains
-          a keyword (also in chats WeChat keeps silent). set only changes the keyword list.
-          wechat-antirecall window-privacy get|on|off [--app /Applications/WeChat.app] [--json]
-          window-privacy on keeps every WeChat window out of screen sharing, recordings and other
-          apps' screenshots (NSWindow sharingType none). It needs no per-build address.
-          recall-log on keeps a local list of intercepted recalls (who, when, preview) in the
-          WeChat container. It is off by default; clear deletes the stored entries.
+          wechat-antirecall install  [--app /Applications/WeChat.app] [--config patches.json] [--with-tip] [--dry-run] [--no-backup] [--skip-resign] [--json]
+          wechat-antirecall restore  --backup <path> [--binary Contents/Resources/wechat.dylib] [--app /Applications/WeChat.app] [--skip-resign]
 
         Notes:
-          install only patches versions present in patches.json.
-          unknown WeChat builds are refused instead of guessed.
-          --with-tip is deprecated; prefer --runtime-tip on supported builds. --with-tip
-          is a pure byte patch with no runtime hook, so it cannot handle your own recalls
-          (they leave a duplicate tip line); --runtime-tip addresses this via its hook.
-          --with-tip still works as a fallback.
+          Supported builds: 270390 (silent + --with-tip native recall notice), 270416 (silent only).
+          --with-tip keeps the message AND shows WeChat's own "recalled a message" notice.
+          Unknown WeChat builds are refused instead of guessed.
           --json emits machine-readable output (used by the GUI); on error it prints a JSON
           envelope to stdout and still exits non-zero.
         """)
     }
-}
-
-private func printPreview(phrase: RecallTipPhrase, senderName: String?, messageKind: String, messageText: String) {
-    let preview = RecallTipPreview(
-        phrase: phrase,
-        senderName: senderName,
-        messageKind: messageKind,
-        messageText: messageText,
-        timestamp: Date(),
-        timeZone: .current
-    )
-    print("Preview:")
-    print(preview.render())
 }
 
 struct CommonOptions {
@@ -1237,37 +420,15 @@ struct CommonOptions {
 struct InstallOptions {
     var appPath = defaultAppPath
     var configPath: String?
-    var withTip = false
-    // True only when the user passed `--with-tip` themselves, as opposed to `withTip`
-    // being implied by `--runtime-tip`. Drives the deprecation notice so users already
-    // on the recommended `--runtime-tip` path are not nagged.
-    var explicitWithTip = false
-    var multiInstance = false
-    var blockUpdate = false
-    var updateOnly = false
     var dryRun = false
     var noBackup = false
     var skipResign = false
-    var runtimeTip = false
-    var runtimeDylibPath: String?
+    /// true = keep the message AND show WeChat's own recall notice (revoke-tip target).
+    var withTip = false
     var json = false
 
     var targetIdentifiers: [String] {
-        if updateOnly {
-            return ["update"]
-        }
-
-        var identifiers = [withTip ? "revoke-tip" : "revoke"]
-        if runtimeTip {
-            identifiers.append("runtime-tip")
-        }
-        if multiInstance {
-            identifiers.append("multiInstance")
-        }
-        if blockUpdate {
-            identifiers.append("update")
-        }
-        return identifiers
+        [withTip ? "revoke-tip" : "revoke"]
     }
 
     init(_ arguments: [String]) throws {
@@ -1278,82 +439,20 @@ struct InstallOptions {
                 appPath = try parser.requiredValue(after: argument)
             case "--config":
                 configPath = try parser.requiredValue(after: argument)
-            case "--with-tip":
-                withTip = true
-                explicitWithTip = true
-            case "--runtime-tip":
-                runtimeTip = true
-                withTip = true
-            case "--runtime-dylib":
-                runtimeDylibPath = try parser.requiredValue(after: argument)
-                runtimeTip = true
-                withTip = true
-            case "--multi-instance":
-                multiInstance = true
-            case "--block-update":
-                blockUpdate = true
-            case "--update-only":
-                updateOnly = true
-                blockUpdate = true
             case "--dry-run":
                 dryRun = true
             case "--no-backup":
                 noBackup = true
             case "--skip-resign":
                 skipResign = true
+            case "--with-tip":
+                withTip = true
             case "--json":
                 json = true
             default:
-                throw ToolError.usage("未知参数：\(argument)")
+                throw ToolError.usage("未知参数：\(argument)。本精简版支持静默防撤回（默认）与 --with-tip 原生撤回提示。")
             }
         }
-
-        if updateOnly && runtimeTip {
-            throw ToolError.usage("--update-only 不能与 --runtime-tip 同时使用")
-        }
-        if updateOnly && multiInstance {
-            throw ToolError.usage("--update-only 不能与 --multi-instance 同时使用")
-        }
-        if updateOnly && withTip {
-            throw ToolError.usage("--update-only 不能与 --with-tip 同时使用")
-        }
-    }
-}
-
-// The deprecation notice shown when `--with-tip` is used on its own. `--runtime-tip`
-// supersedes it: only the runtime hook can keep the user's own recalls from leaving a
-// duplicate tip line, which the static `--with-tip` byte patch cannot fix. Returned as
-// a string (rather than printed inline) so it can be unit-tested.
-func withTipDeprecationNotice(buildVersion: String, runtimeTipSupported: Bool) -> String {
-    let header = "警告：--with-tip 已弃用（deprecated），后续版本可能移除。"
-    if runtimeTipSupported {
-        return """
-        \(header)
-        建议改用 --runtime-tip：--with-tip 是纯字节补丁、没有运行时 hook，对你自己撤回的消息会留下重复的撤回提示且无法处理；--runtime-tip 通过运行时 hook 处理这种情况。--with-tip 目前仍可使用。
-        """
-    }
-    return """
-    \(header)
-    当前构建号 \(buildVersion) 暂不支持 --runtime-tip，--with-tip 仍可作为后备使用；注意它是纯字节补丁，对你自己撤回的消息会留下重复的撤回提示且无法处理。
-    """
-}
-
-private func displayName(forTargetIdentifier identifier: String) -> String {
-    switch identifier {
-    case "revoke":
-        return "patch silent"
-    case "revoke-tip":
-        return "patch with recall tip"
-    case "update":
-        return "block automatic update"
-    case "runtime-tip":
-        return "route revoke parser through runtime hook (inline)"
-    case "multiInstance":
-        return "enable multi-instance"
-    case "multiInstance-extra":
-        return "enable multi-instance (extra)"
-    default:
-        return identifier
     }
 }
 
@@ -1541,343 +640,6 @@ final class MachOPatcher {
     }
 }
 
-final class MachODylibInjector {
-    private let fileURL: URL
-
-    init(fileURL: URL) {
-        self.fileURL = fileURL
-    }
-
-    func inject(installName: String, arch: CPUArch, dryRun: Bool) throws -> [DylibInjectionReport] {
-        var data = try Data(contentsOf: fileURL)
-        let reports = try inject(installName: installName, arch: arch, dryRun: dryRun, data: &data)
-
-        if !dryRun && reports.contains(where: { $0.status == .injected }) {
-            let handle = try FileHandle(forWritingTo: fileURL)
-            defer {
-                try? handle.close()
-            }
-            try handle.seek(toOffset: 0)
-            handle.write(data)
-        }
-
-        return reports
-    }
-
-    private func inject(
-        installName: String,
-        arch: CPUArch,
-        dryRun: Bool,
-        data: inout Data
-    ) throws -> [DylibInjectionReport] {
-        guard data.count >= 4 else {
-            throw ToolError.unsupportedMachO(fileURL.path)
-        }
-
-        let nativeMagic = data.leUInt32(at: 0)
-        let bigEndianMagic = data.beUInt32(at: 0)
-
-        if bigEndianMagic == fatMagic || bigEndianMagic == fatMagic64 {
-            return try injectFat(
-                installName: installName,
-                arch: arch,
-                is64BitFat: bigEndianMagic == fatMagic64,
-                dryRun: dryRun,
-                data: &data
-            )
-        }
-
-        if nativeMagic == mhMagic64 {
-            guard let report = try injectThin(
-                installName: installName,
-                arch: arch,
-                machOffset: 0,
-                dryRun: dryRun,
-                data: &data
-            ) else {
-                throw ToolError.noMatchingSlice(fileURL.path)
-            }
-            return [report]
-        }
-
-        throw ToolError.unsupportedMachO(fileURL.path)
-    }
-
-    private func injectFat(
-        installName: String,
-        arch: CPUArch,
-        is64BitFat: Bool,
-        dryRun: Bool,
-        data: inout Data
-    ) throws -> [DylibInjectionReport] {
-        let nfat = Int(data.beUInt32(at: 4))
-        var offset = 8
-        var reports: [DylibInjectionReport] = []
-
-        for _ in 0..<nfat {
-            let length = is64BitFat ? 32 : 20
-            let cpuType = Int32(bitPattern: data.beUInt32(at: offset))
-            let sliceOffset = is64BitFat ? data.beUInt64(at: offset + 8) : UInt64(data.beUInt32(at: offset + 8))
-            offset += length
-
-            guard cpuType == arch.cpuType else {
-                continue
-            }
-
-            if let report = try injectThin(
-                installName: installName,
-                arch: arch,
-                machOffset: Int(sliceOffset),
-                dryRun: dryRun,
-                data: &data
-            ) {
-                reports.append(report)
-            }
-        }
-
-        if reports.isEmpty {
-            throw ToolError.noMatchingSlice(fileURL.path)
-        }
-
-        return reports
-    }
-
-    private func injectThin(
-        installName: String,
-        arch: CPUArch,
-        machOffset: Int,
-        dryRun: Bool,
-        data: inout Data
-    ) throws -> DylibInjectionReport? {
-        guard data.leUInt32(at: machOffset) == mhMagic64 else {
-            throw ToolError.unsupportedMachO(fileURL.path)
-        }
-
-        let cpuType = Int32(bitPattern: data.leUInt32(at: machOffset + 4))
-        guard cpuType == arch.cpuType else {
-            return nil
-        }
-
-        let ncmds = Int(data.leUInt32(at: machOffset + 16))
-        let sizeofcmds = Int(data.leUInt32(at: machOffset + 20))
-        let commandStart = machOffset + 32
-        let insertionOffset = commandStart + sizeofcmds
-
-        var commandOffset = commandStart
-        var firstContentOffset = Int.max
-        for _ in 0..<ncmds {
-            let cmd = data.leUInt32(at: commandOffset)
-            let cmdsize = Int(data.leUInt32(at: commandOffset + 4))
-            guard cmdsize > 0 else {
-                throw ToolError.unsupportedMachO(fileURL.path)
-            }
-
-            if cmd == lcLoadDylib {
-                let nameOffset = Int(data.leUInt32(at: commandOffset + 8))
-                let start = commandOffset + nameOffset
-                let end = (start..<(commandOffset + cmdsize)).first { data[$0] == 0 } ?? commandOffset + cmdsize
-                let existingName = String(data: data[start..<end], encoding: .utf8)
-                if existingName == installName {
-                    return DylibInjectionReport(
-                        arch: arch,
-                        installName: installName,
-                        commandOffset: UInt64(commandOffset),
-                        paddingLeft: UInt64(firstContentOffset == Int.max ? 0 : max(0, firstContentOffset - insertionOffset)),
-                        status: .alreadyInjected
-                    )
-                }
-            }
-
-            if cmd == lcSegment64 {
-                let sliceRelativeContentOffset = firstSectionOffset(commandOffset: commandOffset, data: data)
-                if sliceRelativeContentOffset != Int.max {
-                    firstContentOffset = min(firstContentOffset, machOffset + sliceRelativeContentOffset)
-                }
-            }
-
-            commandOffset += cmdsize
-        }
-
-        guard firstContentOffset != Int.max else {
-            throw ToolError.invalidConfig("无法计算 \(fileURL.path) 的 Mach-O header padding")
-        }
-
-        let commandData = makeLoadDylibCommand(installName: installName)
-        let availablePadding = firstContentOffset - insertionOffset
-        guard commandData.count <= availablePadding else {
-            throw ToolError.invalidConfig(
-                "\(fileURL.lastPathComponent) 的 Mach-O header padding 不足，至少需要 \(commandData.count) 字节，实际只有 \(availablePadding) 字节"
-            )
-        }
-
-        let report = DylibInjectionReport(
-            arch: arch,
-            installName: installName,
-            commandOffset: UInt64(insertionOffset),
-            paddingLeft: UInt64(availablePadding - commandData.count),
-            status: dryRun ? .wouldInject : .injected
-        )
-
-        guard !dryRun else {
-            return report
-        }
-
-        data.replaceSubrange(insertionOffset..<(insertionOffset + commandData.count), with: commandData)
-        data.setLEUInt32(UInt32(ncmds + 1), at: machOffset + 16)
-        data.setLEUInt32(UInt32(sizeofcmds + commandData.count), at: machOffset + 20)
-        return report
-    }
-
-    private func firstSectionOffset(commandOffset: Int, data: Data) -> Int {
-        let nsects = Int(data.leUInt32(at: commandOffset + 64))
-        guard nsects > 0 else {
-            let fileoff = Int(data.leUInt64(at: commandOffset + 40))
-            return fileoff > 0 ? fileoff : Int.max
-        }
-
-        var result = Int.max
-        var sectionOffset = commandOffset + 72
-        for _ in 0..<nsects {
-            let offset = Int(data.leUInt32(at: sectionOffset + 48))
-            if offset > 0 {
-                result = min(result, offset)
-            }
-            sectionOffset += 80
-        }
-        return result
-    }
-
-    private func makeLoadDylibCommand(installName: String) -> Data {
-        var data = Data()
-        let pathBytes = Array(installName.utf8) + [0]
-        let commandSize = alignedTo8(24 + pathBytes.count)
-
-        data.append(contentsOf: littleEndianBytes(lcLoadDylib))
-        data.append(contentsOf: littleEndianBytes(UInt32(commandSize)))
-        data.append(contentsOf: littleEndianBytes(UInt32(24)))
-        data.append(contentsOf: littleEndianBytes(UInt32(2)))
-        data.append(contentsOf: littleEndianBytes(UInt32(0)))
-        data.append(contentsOf: littleEndianBytes(UInt32(0)))
-        data.append(contentsOf: pathBytes)
-
-        if data.count < commandSize {
-            data.append(contentsOf: Array(repeating: 0, count: commandSize - data.count))
-        }
-
-        return data
-    }
-
-    private func alignedTo8(_ value: Int) -> Int {
-        (value + 7) & ~7
-    }
-
-    private func littleEndianBytes(_ value: UInt32) -> [UInt8] {
-        [
-            UInt8(value & 0xff),
-            UInt8((value >> 8) & 0xff),
-            UInt8((value >> 16) & 0xff),
-            UInt8((value >> 24) & 0xff)
-        ]
-    }
-}
-
-struct RuntimeTipInstaller {
-    static let dylibFileName = "libWeChatAntiRecallRuntime.dylib"
-    static let installName = "@loader_path/\(dylibFileName)"
-    static let hostBinaryPath = "Contents/Resources/wechat.dylib"
-    static let destinationDylibPath = "Contents/Resources/\(dylibFileName)"
-    static let supportedBuildVersions = ["268597", "268599", "268601", "268602", "268831", "268849", "268850", "268851", "269077", "269079", "269110", "269332", "269333", "269334", "269338", "269340", "269341", "269574", "269575", "269576", "269577", "269578", "269579", "269619", "269624", "269628", "270090", "270100", "270102", "270132", "270133", "270135", "270352", "270390"]
-
-    let sourceDylibURL: URL
-    let destinationDylibURL: URL
-    let hostBinaryURL: URL
-
-    var destinationDylibRelativePath: String {
-        Self.destinationDylibPath
-    }
-
-    init(appInfo: AppInfo, options: InstallOptions) throws {
-        guard options.runtimeTip else {
-            throw ToolError.invalidConfig("runtime-tip 未启用")
-        }
-        guard Self.supportedBuildVersions.contains(appInfo.buildVersion) else {
-            throw ToolError.invalidConfig(
-                "runtime-tip 目前只支持微信构建号 \(Self.supportedBuildVersions.joined(separator: ", "))，当前构建号是 \(appInfo.buildVersion)"
-            )
-        }
-
-        sourceDylibURL = try Self.resolveSourceDylibURL(path: options.runtimeDylibPath)
-        destinationDylibURL = appInfo.appURL.appendingPathComponent(Self.destinationDylibPath)
-        hostBinaryURL = appInfo.appURL.appendingPathComponent(Self.hostBinaryPath)
-    }
-
-    func install(dryRun: Bool) throws -> [DylibInjectionReport] {
-        let reports = try MachODylibInjector(fileURL: hostBinaryURL).inject(
-            installName: Self.installName,
-            arch: .arm64,
-            dryRun: true
-        )
-
-        guard !dryRun else {
-            return reports
-        }
-
-        try copyRuntimeDylib()
-        return try MachODylibInjector(fileURL: hostBinaryURL).inject(
-            installName: Self.installName,
-            arch: .arm64,
-            dryRun: false
-        )
-    }
-
-    private static func resolveSourceDylibURL(path: String?) throws -> URL {
-        let fileManager = FileManager.default
-        if let path {
-            let url = URL(fileURLWithPath: path)
-            guard fileManager.isReadableFile(atPath: url.path) else {
-                throw ToolError.invalidConfig("找不到 runtime dylib：\(path)")
-            }
-            return url
-        }
-
-        let executableDirectory = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
-        let workingDirectory = URL(fileURLWithPath: fileManager.currentDirectoryPath)
-        let candidates = [
-            executableDirectory.appendingPathComponent(Self.dylibFileName),
-            workingDirectory.appendingPathComponent(".build/release/\(Self.dylibFileName)"),
-            workingDirectory.appendingPathComponent(".build/debug/\(Self.dylibFileName)"),
-            workingDirectory.appendingPathComponent(".build/arm64-apple-macosx/release/\(Self.dylibFileName)"),
-            workingDirectory.appendingPathComponent(".build/arm64-apple-macosx/debug/\(Self.dylibFileName)")
-        ]
-
-        if let url = candidates.first(where: { fileManager.isReadableFile(atPath: $0.path) }) {
-            return url
-        }
-
-        throw ToolError.usage("找不到 \(Self.dylibFileName)，请先运行 swift build -c release，或使用 --runtime-dylib <path>")
-    }
-
-    private func copyRuntimeDylib() throws {
-        let fileManager = FileManager.default
-        do {
-            try fileManager.createDirectory(
-                at: destinationDylibURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            if fileManager.fileExists(atPath: destinationDylibURL.path) {
-                try fileManager.removeItem(at: destinationDylibURL)
-            }
-            try fileManager.copyItem(at: sourceDylibURL, to: destinationDylibURL)
-        } catch {
-            throw ToolError.fileOperationFailed(
-                operation: "安装 runtime dylib",
-                path: destinationDylibURL.path,
-                underlying: error.localizedDescription
-            )
-        }
-    }
-}
-
 private func loadConfigs(path: String?) throws -> [VersionConfig] {
     let configURL = try resolveConfigURL(path: path)
     let data = try Data(contentsOf: configURL)
@@ -1901,11 +663,6 @@ private func resolveConfigURL(path: String?) throws -> URL {
     }
 
     throw ToolError.invalidConfig("找不到 patches.json，请使用 --config 指定路径")
-}
-
-func recallTipPreferenceDomain(appPath: String?) throws -> String {
-    guard let appPath else { return RecallTipPreferenceStore.domain }
-    return try readAppInfo(appPath: appPath).bundleIdentifier
 }
 
 private func isSafePreferenceDomain(_ domain: String) -> Bool {
@@ -1949,8 +706,7 @@ private func readAppInfo(appPath: String) throws -> AppInfo {
         throw ToolError.notAWechatApp(appPath)
     }
     let isOfficialWechat = bundleIdentifier == "com.tencent.xinWeChat" || bundleIdentifier == "com.tencent.xin"
-    let isToolClone = WeChatCloneMetadata.isAcceptedClone(plist: plist, bundleIdentifier: bundleIdentifier)
-    guard isOfficialWechat || isToolClone else {
+    guard isOfficialWechat else {
         throw ToolError.notAWechatApp(appPath)
     }
 
@@ -1970,11 +726,11 @@ private func configForInstalledApp(_ appInfo: AppInfo, configs: [VersionConfig])
     throw ToolError.unsupportedVersion(found: appInfo.buildVersion, supported: configs.map(\.version))
 }
 
+
 private func validateInstallPermissions(
     appInfo: AppInfo,
     targets: [PatchTarget],
-    options: InstallOptions,
-    runtimeInstaller: RuntimeTipInstaller?
+    options: InstallOptions
 ) throws {
     guard !options.dryRun else {
         return
@@ -1991,14 +747,6 @@ private func validateInstallPermissions(
         if !options.noBackup {
             try requireDirectoryWritable(binaryURL.deletingLastPathComponent(), operation: "在目标目录创建备份")
         }
-    }
-
-    if let runtimeInstaller {
-        try requireWritable(runtimeInstaller.hostBinaryURL, operation: "注入 runtime 到目标二进制")
-        try requireDirectoryWritable(
-            runtimeInstaller.destinationDylibURL.deletingLastPathComponent(),
-            operation: "安装 runtime dylib"
-        )
     }
 
     if !options.skipResign {
@@ -2069,15 +817,74 @@ func processExecutablePath(_ candidatePath: String, belongsToAppAt appURL: URL) 
     return candidate == appPath || candidate.hasPrefix(appPrefix)
 }
 
-private func requireWritable(_ url: URL, operation: String) throws {
-    if access(url.path, W_OK) != 0 {
-        throw ToolError.permissionDenied(path: url.path, operation: operation)
+/// Channel check, kept as a pure function so it can be unit tested.
+///
+/// The ONLY reliable App Store signal is `Contents/_MASReceipt/receipt`: the official
+/// weixin.qq.com dmg never has one, and ad-hoc re-signing does not create one. Signature
+/// state is NOT a channel signal — every successful install by this tool leaves the app
+/// ad-hoc with no Authority at all. Judging by `Signature=adhoc` (or by a missing
+/// `Developer ID Application` Authority) made every post-install detection fail with
+/// "unsupportedAppSignature" even though the patch was already applied and verified.
+enum AppSignaturePolicy {
+    enum Verdict: Equatable {
+        case patchable
+        case appStoreChannel(reason: String)
+    }
+
+    static func classify(hasMASReceipt: Bool, codesignInfo: String) -> Verdict {
+        if hasMASReceipt {
+            return .appStoreChannel(
+                reason: "bundle 内存在 Contents/_MASReceipt/receipt，这是 App Store 渠道版本"
+            )
+        }
+        if codesignInfo.contains("Authority=Software Signing") ||
+            (codesignInfo.contains("Apple Code Signing Certification Authority") &&
+                !codesignInfo.contains("Developer ID Application")) {
+            return .appStoreChannel(
+                reason: "当前签名是 Apple Software Signing（App Store 版本），不是官网 Developer ID 版"
+            )
+        }
+        // Pristine official dmg (Developer ID) and this tool's own install result (ad-hoc)
+        // are both safe. Anything else falls through to the byte-level checks.
+        return .patchable
     }
 }
 
-private func requireDirectoryWritable(_ url: URL, operation: String) throws {
-    try requireWritable(url, operation: operation)
+private func validateAppSignatureIsPatchable(appURL: URL) throws {
+    let hasMASReceipt = FileManager.default.fileExists(
+        atPath: appURL.appendingPathComponent("Contents/_MASReceipt/receipt").path
+    )
+    let result = try captureProcessOutput(
+        "/usr/bin/codesign", ["-dv", "--verbose=4", appURL.path]
+    )
+    let stdout = String(data: result.stdout, encoding: .utf8) ?? ""
+    let stderr = String(data: result.stderr, encoding: .utf8) ?? ""
 
+    switch AppSignaturePolicy.classify(hasMASReceipt: hasMASReceipt, codesignInfo: stdout + stderr) {
+    case .patchable:
+        return
+    case .appStoreChannel(let reason):
+        throw ToolError.unsupportedAppSignature(path: appURL.path, reason: reason)
+    }
+}
+
+private func requireWritable(_ url: URL, operation: String) throws {
+    // access(_:W_OK) checks the REAL uid, not the effective uid. When the GUI elevates via
+    // `osascript ... with administrator privileges`, only the effective uid becomes root;
+    // the real uid stays as the invoking user. That made access() falsely report no-write on
+    // root-owned targets like /Applications/WeChat.app/.../wechat.dylib even though the
+    // subsequent write (which uses the effective uid) succeeds. Probe with a real write
+    // handle instead — opening without writing reflects the credentials the actual patch
+    // will use and does not modify the file.
+    let fd = url.path.withCString { Darwin.open($0, O_WRONLY) }
+    guard fd >= 0 else {
+        throw ToolError.permissionDenied(path: url.path, operation: operation)
+    }
+    Darwin.close(fd)
+}
+
+private func requireDirectoryWritable(_ url: URL, operation: String) throws {
+    // Same reason as requireWritable: use a real create/delete probe rather than access().
     let probeURL = url.appendingPathComponent(".wechat-antirecall-write-test-\(UUID().uuidString)")
     do {
         try Data().write(to: probeURL, options: .withoutOverwriting)
@@ -2582,6 +1389,24 @@ private func runProcessCapture(
     let output = outputPipe.fileHandleForReading.readDataToEndOfFile()
     process.waitUntilExit()
     return (process.terminationStatus, output)
+}
+
+private func captureProcessOutput(
+    _ executable: String,
+    _ arguments: [String]
+) throws -> (stdout: Data, stderr: Data) {
+    let process = Process()
+    let stdoutPipe = Pipe()
+    let stderrPipe = Pipe()
+    process.executableURL = URL(fileURLWithPath: executable)
+    process.arguments = arguments
+    process.standardOutput = stdoutPipe
+    process.standardError = stderrPipe
+    try process.run()
+    let stdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+    let stderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    return (stdout, stderr)
 }
 
 private func runProcessStatus(_ executable: String, _ arguments: [String]) -> Int32 {

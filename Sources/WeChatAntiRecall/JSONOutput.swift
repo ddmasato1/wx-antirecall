@@ -1,16 +1,9 @@
 import Foundation
 
-// Machine-readable output for the GUI (and any other automation). Kept in a separate
-// file so the `Decodable`-only domain types (VersionConfig/PatchTarget/PatchEntry, which
-// have custom hex-parsing `init(from:)`) stay untouched — adding `Encodable` to those
-// would force a brittle hand-written `encode(to:)`. Instead we define plain `Encodable`
-// DTOs here and map from the domain types at the call sites.
+// Machine-readable output for the GUI. Only the silent recall patch remains in this
+// small-build-matrix (270390 / 270416) fork, so the DTO surface is intentionally small.
 //
-// Every top-level report carries `schemaVersion` so a newer build-from-source CLI paired
-// with an older GUI (or vice versa) is detectable.
-
-// v2: red-packet settings gained `notifyOnly` (notify-only mode) and the runtime
-// marker moved to WeChatAntiRecallRedPacket:5.
+// Every top-level report carries `schemaVersion` so a mismatched CLI/GUI pair is detectable.
 
 let jsonSchemaVersion = 2
 
@@ -59,23 +52,12 @@ struct VersionsReport: Encodable {
     let schemaVersion: Int
     let app: AppInfoDTO
     let supported: Bool
-    let runtimeTipSupported: Bool
     let installedBuildTargets: [String]
-    let features: FeaturesDTO
     let catalog: [CatalogEntryDTO]
-
-    struct FeaturesDTO: Encodable {
-        let silent: Bool
-        let tip: Bool
-        let blockUpdate: Bool
-        let multiInstance: Bool
-        let customTip: Bool
-    }
 
     struct CatalogEntryDTO: Encodable {
         let build: String
         let targets: [String]
-        let runtimeTipSupported: Bool
     }
 
     init(appInfo: AppInfo, configs: [VersionConfig]) {
@@ -84,29 +66,8 @@ struct VersionsReport: Encodable {
 
         let installedConfig = configs.first { $0.version == appInfo.buildVersion }
         supported = installedConfig != nil
-        runtimeTipSupported = RuntimeTipInstaller.supportedBuildVersions.contains(appInfo.buildVersion)
-
-        let installedIdentifiers = installedConfig?.targets.map(\.identifier) ?? []
-        installedBuildTargets = installedIdentifiers
-
-        features = FeaturesDTO(
-            silent: installedIdentifiers.contains("revoke"),
-            tip: installedIdentifiers.contains("revoke-tip"),
-            blockUpdate: installedIdentifiers.contains("update"),
-            multiInstance: installedIdentifiers.contains("multiInstance"),
-            // custom-tip is gated by the compiled crash-interlock list, NOT by the
-            // presence of a `runtime-tip` byte-patch target. This is the authoritative fact
-            // the GUI cannot derive from patches.json alone.
-            customTip: RuntimeTipInstaller.supportedBuildVersions.contains(appInfo.buildVersion)
-        )
-
-        catalog = configs.map { config in
-            CatalogEntryDTO(
-                build: config.version,
-                targets: config.targets.map(\.identifier),
-                runtimeTipSupported: RuntimeTipInstaller.supportedBuildVersions.contains(config.version)
-            )
-        }
+        installedBuildTargets = installedConfig?.targets.map(\.identifier) ?? []
+        catalog = configs.map { CatalogEntryDTO(build: $0.version, targets: $0.targets.map(\.identifier)) }
     }
 }
 
@@ -119,7 +80,6 @@ struct InstallReport: Encodable {
     let resigned: Bool
     let app: AppInfoDTO
     let mode: [String]
-    let runtime: [RuntimeReportDTO]
     let targets: [TargetReportDTO]
 
     struct TargetReportDTO: Encodable {
@@ -143,49 +103,6 @@ struct InstallReport: Encodable {
             case .wouldPatch: state = "wouldPatch"
             case .alreadyPatched: state = "alreadyPatched"
             }
-        }
-    }
-
-    struct RuntimeReportDTO: Encodable {
-        let arch: String
-        let installName: String
-        let commandOffset: String
-        let state: String
-
-        init(_ report: DylibInjectionReport) {
-            arch = report.arch.rawValue
-            installName = report.installName
-            commandOffset = "0x" + String(report.commandOffset, radix: 16)
-            switch report.status {
-            case .injected: state = "injected"
-            case .wouldInject: state = "wouldInject"
-            case .alreadyInjected: state = "alreadyInjected"
-            }
-        }
-    }
-}
-
-// MARK: - clone --json
-
-struct CloneReport: Encodable {
-    let schemaVersion: Int
-    let command = "clone"
-    let dryRun: Bool
-    let app: AppInfoDTO
-    let keepURLSchemes: Bool
-    let clones: [CloneSpecDTO]
-
-    struct CloneSpecDTO: Encodable {
-        let index: Int
-        let displayName: String
-        let bundleIdentifier: String
-        let destination: String
-
-        init(_ spec: WeChatCloneSpec) {
-            index = spec.index
-            displayName = spec.displayName
-            bundleIdentifier = spec.bundleIdentifier
-            destination = spec.destinationURL.path
         }
     }
 }
@@ -266,6 +183,9 @@ struct ErrorDTO: Encodable {
             kind = "appIsRunning"
             self.path = path
             self.pids = pids
+        case .unsupportedAppSignature(let path, _):
+            kind = "unsupportedAppSignature"
+            self.path = path
         }
     }
 }

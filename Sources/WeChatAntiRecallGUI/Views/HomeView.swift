@@ -4,9 +4,6 @@ import UniformTypeIdentifiers
 
 struct HomeView: View {
     @EnvironmentObject var state: AppState
-    var goToCustomTip: () -> Void
-    var goToAdvanced: () -> Void
-    var goToUpdates: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.gap) {
@@ -18,13 +15,7 @@ struct HomeView: View {
 
             switch state.supportStatus {
             case .supported:
-                if state.customTipNeedsRestore {
-                    customTipResidualCard
-                } else if state.installedMode == .customTip || state.silentAvailable {
-                    supportedActions
-                } else {
-                    silentUnavailableCard
-                }
+                supportedActions
             case .unsupported(let build):
                 unsupportedCard(build: build)
             case .noWeChat:
@@ -127,13 +118,32 @@ struct HomeView: View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    SectionLabel(text: activeMode.title)
+                    SectionLabel(text: state.withTip ? "防撤回 · 显示提示" : "静默防撤回")
                     Spacer()
                     installStatePill
                 }
-                Text(activeMode.subtitle)
+                Text(state.withTip
+                     ? "别人撤回的消息保留，同时显示微信原生的「撤回了一条消息」提示。仅构建 270390 支持。"
+                     : "别人撤回的消息原样留下，不显示任何提示。支持微信构建 270390 / 270416。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+
+                Picker("显示效果", selection: Binding(
+                    get: { state.withTip },
+                    set: { enabled in
+                        Task { await state.setWithTip(enabled) }
+                    }
+                )) {
+                    Text("静默保留").tag(false)
+                    Text("显示撤回提示").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .disabled(state.busy || !state.tipAvailable)
+                if !state.tipAvailable {
+                    Text("当前构建号暂不支持显示提示，只能用静默模式。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 if state.wechatRunning {
                     HStack(spacing: 10) {
@@ -144,55 +154,40 @@ struct HomeView: View {
                     }
                 }
 
-                if state.installedMode == .customTip {
-                    Button(action: goToCustomTip) {
-                        Label("修改自定义提示", systemImage: "text.bubble")
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 4)
+                Button {
+                    Task { await state.install(InstallRequest(withTip: state.withTip)) }
+                } label: {
+                    Text(state.installState == .installed
+                         ? "重新安装防撤回"
+                         : (state.withTip ? "开启防撤回（显示提示）" : "开启静默防撤回"))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(Theme.accent)
+                .disabled(state.busy || state.wechatRunning || !state.silentAvailable)
+
+                HStack(spacing: 12) {
+                    Button("只检查，不修改") {
+                        Task { await state.checkOnly(InstallRequest(withTip: state.withTip)) }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .tint(Theme.accent)
-                } else {
-                    Button {
-                        Task { await state.install(InstallRequest(mode: .silent)) }
-                    } label: {
-                        Text(state.installState == .installed ? "重新安装防撤回" : "开启静默防撤回")
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 4)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .tint(Theme.accent)
+                    .buttonStyle(.link)
                     .disabled(state.busy || state.wechatRunning)
                 }
 
-                HStack(spacing: 12) {
-                    if state.installedMode != .customTip && state.customTipAvailable {
-                        Button("使用自定义提示") { goToCustomTip() }
-                            .buttonStyle(.link)
-                    }
-                    Button("更多安装选项") { goToAdvanced() }
-                        .buttonStyle(.link)
-                }
-
                 HintRow(systemImage: "info.circle",
-                        text: state.installedMode == .customTip
-                            ? "自定义提示运行时已安装；修改短语后完全退出并重开微信即可生效。"
-                            : "安装会修改并重新签名微信。装完请完全退出并重开微信。")
+                        text: "仅支持官网 dmg 版微信；App Store 版会被拒绝。安装会修改并重新签名微信，装完请完全退出并重开。")
             }
         }
-    }
-
-    private var activeMode: InstallMode {
-        state.installedMode ?? .silent
     }
 
     private var installStatePill: some View {
         switch state.installState {
         case .installed:
-            let text = state.installedMode == .customTip ? "自定义提示已开启" : "静默模式已开启"
-            return AnyView(StatusPill(tone: .good, text: text, systemImage: "checkmark.circle.fill"))
+            return AnyView(StatusPill(tone: .good,
+                                      text: state.withTip ? "提示模式已开启" : "静默模式已开启",
+                                      systemImage: "checkmark.circle.fill"))
         case .notInstalled: return AnyView(StatusPill(tone: .neutral, text: "未开启"))
         case .mismatch: return AnyView(StatusPill(tone: .warn, text: "数据不匹配"))
         case .unknown: return AnyView(EmptyView())
@@ -200,40 +195,6 @@ struct HomeView: View {
     }
 
     // MARK: - Unsupported / no WeChat
-
-    private var customTipResidualCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 10) {
-                SectionLabel(text: "检测到不一致的自定义提示状态")
-                Text("部分自定义提示运行时或 hook 已存在，不能直接覆盖为静默模式。请到「恢复 / 卸载」还原对应备份。")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button("查看高级安装指引", action: goToAdvanced)
-                    .buttonStyle(.bordered)
-            }
-        }
-    }
-
-    private var silentUnavailableCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 10) {
-                SectionLabel(text: "当前版本没有静默防撤回")
-                Text("补丁数据识别了这个微信构建，但没有提供静默防撤回所需的完整补丁点。")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if state.customTipAvailable {
-                    Button("使用自定义提示", action: goToCustomTip)
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.accent)
-                } else {
-                    Button("查看可用安装模式", action: goToAdvanced)
-                        .buttonStyle(.bordered)
-                }
-            }
-        }
-    }
 
     private var detectionFailedCard: some View {
         Card {
@@ -256,23 +217,10 @@ struct HomeView: View {
         Card {
             VStack(alignment: .leading, spacing: 12) {
                 SectionLabel(text: "此版本暂不支持")
-                Text("当前微信构建号 \(build) 还不在补丁数据里。支持新版本通常只需要更新一份很小的补丁数据——先试试拉取最新数据。")
+                Text("当前微信构建号 \(build) 不在本精简版支持的范围内。本工具仅支持 270390 / 270416 的静默防撤回，不会拉取其他版本的补丁数据。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                HStack {
-                    Button {
-                        Task { await state.updatePatchData() }
-                    } label: {
-                        Label("拉取最新补丁数据", systemImage: "arrow.down.circle")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.accent)
-                    .disabled(state.busy)
-
-                    Button("更多更新选项") { goToUpdates() }
-                        .buttonStyle(.bordered)
-                }
             }
         }
     }
@@ -293,7 +241,7 @@ struct HomeView: View {
     private func chooseTargetApp() {
         let panel = NSOpenPanel()
         panel.title = "选择官方 macOS 微信"
-        panel.message = "请选择微信 App。本轮不支持选择多开副本。"
+        panel.message = "请选择微信 App。本精简版不支持多开副本。"
         panel.prompt = "选择"
         panel.allowedContentTypes = [.applicationBundle]
         panel.allowsMultipleSelection = false

@@ -2,15 +2,7 @@ import SwiftUI
 
 enum NavSection: String, CaseIterable, Identifiable {
     case home
-    case tipPhrase
-    case recallLog
-    case keywordAlert
-    case windowPrivacy
-    case redPacket
-    case advanced
-    case clone
     case restore
-    case updates
     case permissions
 
     var id: String { rawValue }
@@ -18,15 +10,7 @@ enum NavSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .home: return "首页"
-        case .tipPhrase: return "自定义提示"
-        case .recallLog: return "撤回记录"
-        case .keywordAlert: return "关键词提醒"
-        case .windowPrivacy: return "窗口隐私"
-        case .redPacket: return "自动红包"
-        case .advanced: return "高级安装"
-        case .clone: return "微信多开"
         case .restore: return "恢复 / 卸载"
-        case .updates: return "检查更新"
         case .permissions: return "权限与帮助"
         }
     }
@@ -34,15 +18,7 @@ enum NavSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .home: return "house.fill"
-        case .tipPhrase: return "text.bubble.fill"
-        case .recallLog: return "clock.arrow.circlepath"
-        case .keywordAlert: return "bell.badge.fill"
-        case .windowPrivacy: return "eye.slash.fill"
-        case .redPacket: return "gift.fill"
-        case .advanced: return "slider.horizontal.3"
-        case .clone: return "square.on.square"
         case .restore: return "arrow.uturn.backward.circle.fill"
-        case .updates: return "arrow.down.circle.fill"
         case .permissions: return "lock.shield.fill"
         }
     }
@@ -51,9 +27,6 @@ enum NavSection: String, CaseIterable, Identifiable {
 struct ContentView: View {
     @EnvironmentObject var state: AppState
     @SceneStorage("navigation.section") private var selectedSectionRaw = NavSection.home.rawValue
-    @SceneStorage("install.mode") private var installModeRaw = InstallMode.silent.rawValue
-    @SceneStorage("install.blockUpdate") private var blockUpdate = false
-    @SceneStorage("install.multiInstance") private var multiInstance = false
 
     private var selectedSection: NavSection {
         NavSection(rawValue: selectedSectionRaw) ?? .home
@@ -63,12 +36,6 @@ struct ContentView: View {
         Binding(
             get: { selectedSection },
             set: { selectedSectionRaw = ($0 ?? .home).rawValue })
-    }
-
-    private var installMode: Binding<InstallMode> {
-        Binding(
-            get: { InstallMode(rawValue: installModeRaw) ?? .silent },
-            set: { installModeRaw = $0.rawValue })
     }
 
     var body: some View {
@@ -88,7 +55,7 @@ struct ContentView: View {
                     .foregroundStyle(Theme.accent)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("微信防撤回").font(.headline)
-                    Text("WeChat AntiRecall").font(.caption).foregroundStyle(.secondary)
+                    Text("270390 / 270416 · 静默防撤回").font(.caption).foregroundStyle(.secondary)
                 }
             }
             .padding(.horizontal, 16)
@@ -119,25 +86,8 @@ struct ContentView: View {
             ScrollView {
                 Group {
                     switch selectedSection {
-                    case .home:
-                        HomeView(
-                            goToCustomTip: { navigate(to: .tipPhrase) },
-                            goToAdvanced: { navigate(to: .advanced) },
-                            goToUpdates: { navigate(to: .updates) })
-                    case .tipPhrase: TipPhraseView()
-                    case .recallLog: RecallLogView()
-                    case .keywordAlert: KeywordAlertView()
-                    case .windowPrivacy: WindowPrivacyView()
-                    case .redPacket: RedPacketView()
-                    case .advanced:
-                        AdvancedInstallView(
-                            mode: installMode,
-                            blockUpdate: $blockUpdate,
-                            multiInstance: $multiInstance,
-                            goToRestore: { navigate(to: .restore) })
-                    case .clone: CloneView()
+                    case .home: HomeView()
                     case .restore: RestoreView()
-                    case .updates: UpdatesView()
                     case .permissions: PermissionsView()
                     }
                 }
@@ -149,10 +99,6 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .underPageBackgroundColor))
-    }
-
-    private func navigate(to section: NavSection) {
-        selectedSectionRaw = section.rawValue
     }
 }
 

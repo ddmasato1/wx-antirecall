@@ -33,8 +33,8 @@ enum BackupBrowser {
     private static let marker = ".wechat-antirecall-backup-"
 
     /// Finds all backups next to patched binaries and groups them by install session
-    /// (timestamp). Restoring a runtime-tip / multi-instance install requires restoring
-    /// every binary from the same session, hence the grouping.
+    /// (timestamp). Grouping keeps restore behavior compatible with backups created by
+    /// the upstream tool, even though this fork only ever backs up one binary per session.
     static func sessions(appPath: String) -> [BackupSession] {
         let appURL = URL(fileURLWithPath: appPath)
         let searchDirs = [

@@ -1,8 +1,8 @@
 #!/bin/bash
 # Assembles WeChatAntiRecall.app from SwiftPM build products. Uses only system tools.
 #
-#   ARCHS="arm64"          (default) — matches reality: patches.json + dylib injection are arm64-only.
-#   ARCHS="arm64 x86_64"   universal — cosmetic; gated on the CI universal-compile canary.
+#   ARCHS="arm64"          (default) — matches reality: the silent patches are arm64-only.
+#   ARCHS="arm64 x86_64"   universal — cosmetic.
 #   CODESIGN_ID="-"        (default) — ad-hoc. Set to a Developer ID to sign properly.
 #
 # Output: dist/WeChatAntiRecall.app
@@ -14,7 +14,6 @@ cd "$ROOT"
 APP_NAME="WeChatAntiRecall"
 GUI="WeChatAntiRecallGUI"
 CLI="wechat-antirecall"
-DYLIB="libWeChatAntiRecallRuntime.dylib"
 BUNDLE_ID="com.github.fzlzjerry.wechatantirecall"
 SIGN_ID="${CODESIGN_ID:--}"
 ARCHS="${ARCHS:-arm64}"
@@ -22,7 +21,7 @@ SHORT_VERSION="${APP_VERSION:-1.0.0}"
 BUILD_NUMBER="${APP_BUILD:-1}"
 
 echo ">> Building ($ARCHS, release)..."
-FLAGS=(-c release)
+FLAGS=(-c release --disable-sandbox)
 for a in $ARCHS; do FLAGS+=(--arch "$a"); done
 swift build "${FLAGS[@]}"
 BIN="$(swift build "${FLAGS[@]}" --show-bin-path)"
@@ -34,7 +33,6 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$BIN/$GUI"          "$APP/Contents/MacOS/$GUI"
 cp "$BIN/$CLI"          "$APP/Contents/Resources/$CLI"
-cp "$BIN/$DYLIB"        "$APP/Contents/Resources/$DYLIB"
 cp "$ROOT/patches.json" "$APP/Contents/Resources/patches.json"
 
 ICON_KEY=""
@@ -66,9 +64,7 @@ $ICON_KEY
 PLIST
 
 echo ">> Code signing (nested first, bundle last)..."
-# Each executable must be independently signed before the bundle is sealed: the CLI runs as
-# its own process and the dylib is dlopen'd into WeChat.
-codesign --force --timestamp=none --sign "$SIGN_ID" "$APP/Contents/Resources/$DYLIB"
+# The CLI runs as its own process, so sign it before sealing the bundle.
 codesign --force --timestamp=none --sign "$SIGN_ID" "$APP/Contents/Resources/$CLI"
 codesign --force --timestamp=none --sign "$SIGN_ID" "$APP/Contents/MacOS/$GUI"
 codesign --force --timestamp=none --sign "$SIGN_ID" "$APP"
