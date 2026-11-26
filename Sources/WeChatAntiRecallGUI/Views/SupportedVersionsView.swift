@@ -65,23 +65,38 @@ struct SupportedVersionsView: View {
     }
 
     private func rowCard(_ row: SupportedVersionRow) -> some View {
-        Card {
+        let installed = isInstalledBuild(row)
+        return Card {
             HStack(alignment: .center, spacing: 12) {
+                Image(systemName: "bubble.left.and.text.bubble.right.fill")
+                    .font(.title3)
+                    .foregroundStyle(installed ? Theme.accent : Color.secondary.opacity(0.6))
+                    .frame(width: 26)
+
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("微信 \(row.wechatVersion) - \(row.build)")
-                        .font(.body.weight(.medium))
-                        .textSelection(.enabled)
+                    HStack(spacing: 8) {
+                        Text("微信 \(row.wechatVersion)")
+                            .font(.body.weight(.semibold))
+                        Text("-")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                        MonoChip(text: row.build)
+                    }
                     HStack(spacing: 6) {
                         if row.silent { modeTag("静默防撤回") }
                         if row.tip { modeTag("显示撤回提示") }
                     }
                 }
                 Spacer()
-                if isInstalledBuild(row) {
+                if installed {
                     StatusPill(tone: .good, text: "当前安装", systemImage: "checkmark.circle.fill")
                 }
             }
         }
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.corner, style: .continuous)
+                .strokeBorder(installed ? Theme.accent.opacity(0.45) : .clear, lineWidth: 1)
+        )
     }
 
     private func isInstalledBuild(_ row: SupportedVersionRow) -> Bool {
@@ -93,7 +108,7 @@ struct SupportedVersionsView: View {
             .font(.caption)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(Capsule().fill(Color.secondary.opacity(0.12)))
-            .foregroundStyle(.secondary)
+            .background(Capsule().fill(Theme.accent.opacity(0.14)))
+            .foregroundStyle(Theme.accent)
     }
 }

@@ -30,42 +30,50 @@ struct HomeView: View {
 
     // MARK: - Status card
 
+    private var wechatIcon: NSImage {
+        let icon = NSWorkspace.shared.icon(forFile: state.appPath)
+        icon.size = NSSize(width: 112, height: 112)
+        return icon
+    }
+
     private var statusCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .center, spacing: 16) {
-                    Image(systemName: "message.fill")
-                        .font(.system(size: 34))
-                        .foregroundStyle(Theme.accent)
-                        .frame(width: 52, height: 52)
-                        .background(Circle().fill(Theme.accent.opacity(0.12)))
+                    Image(nsImage: wechatIcon)
+                        .resizable()
+                        .frame(width: 56, height: 56)
+                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                        )
 
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 7) {
                         Text("微信 \(state.displayVersion)")
-                            .font(.title3.weight(.semibold))
-                        Text("构建号 \(state.displayBuild)")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
+                            .font(.title2.weight(.semibold))
+                        HStack(spacing: 8) {
+                            MonoChip(text: state.displayBuild)
+                            supportPill
+                        }
                     }
 
                     Spacer()
 
-                    VStack(alignment: .trailing, spacing: 6) {
-                        supportPill
+                    VStack(alignment: .trailing, spacing: 8) {
                         if state.busy {
                             HStack(spacing: 6) {
                                 ProgressView().controlSize(.small)
                                 Text(state.busyMessage).font(.caption).foregroundStyle(.secondary)
                             }
-                        } else {
-                            Button {
-                                Task { await state.refresh() }
-                            } label: {
-                                Label("刷新", systemImage: "arrow.clockwise").font(.caption)
-                            }
-                            .buttonStyle(.link)
                         }
+                        Button {
+                            Task { await state.refresh() }
+                        } label: {
+                            Label("刷新", systemImage: "arrow.clockwise").font(.caption)
+                        }
+                        .buttonStyle(.link)
+                        .disabled(state.busy)
                     }
                 }
 
@@ -118,31 +126,35 @@ struct HomeView: View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    SectionLabel(text: state.withTip ? "防撤回 · 显示提示" : "静默防撤回")
+                    SectionLabel(text: "撤回拦截方式")
                     Spacer()
                     installStatePill
                 }
-                Text(state.withTip
-                     ? "别人撤回的消息保留，同时显示微信原生的「撤回了一条消息」提示。支持构建 270390 / 270601。"
-                     : "别人撤回的消息原样留下，不显示任何提示。支持微信构建 270390 / 270416 / 270601。")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
 
-                Picker("显示效果", selection: Binding(
-                    get: { state.withTip },
-                    set: { enabled in
-                        Task { await state.setWithTip(enabled) }
+                HStack(spacing: 12) {
+                    modeCard(
+                        selected: !state.withTip,
+                        icon: "eye.slash.fill",
+                        title: "静默保留",
+                        detail: "消息悄悄留下，界面上没有任何提示",
+                        disabled: state.busy || !state.silentAvailable
+                    ) {
+                        if state.withTip { Task { await state.setWithTip(false) } }
                     }
-                )) {
-                    Text("静默保留").tag(false)
-                    Text("显示撤回提示").tag(true)
+                    modeCard(
+                        selected: state.withTip,
+                        icon: "eye.fill",
+                        title: "显示撤回提示",
+                        detail: "保留消息，并显示微信原生「撤回了一条消息」",
+                        disabled: state.busy || !state.tipAvailable
+                    ) {
+                        if !state.withTip { Task { await state.setWithTip(true) } }
+                    }
                 }
-                .pickerStyle(.segmented)
-                .disabled(state.busy || !state.tipAvailable)
+
                 if !state.tipAvailable {
-                    Text("当前构建号暂不支持显示提示，只能用静默模式。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HintRow(systemImage: "info.circle",
+                            text: "当前构建号暂不支持显示提示，只能用静默模式。", tint: .secondary)
                 }
 
                 if state.wechatRunning {
@@ -180,6 +192,51 @@ struct HomeView: View {
                         text: "仅支持官网 dmg 版微信；App Store 版会被拒绝。安装会修改并重新签名微信，装完请完全退出并重开。")
             }
         }
+    }
+
+    private func modeCard(selected: Bool,
+                          icon: String,
+                          title: String,
+                          detail: String,
+                          disabled: Bool,
+                          action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundStyle(selected ? Theme.accent : .secondary)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(selected ? .primary : .secondary)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+                if selected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Theme.accent)
+                }
+            }
+            .padding(13)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(selected ? Theme.accent.opacity(0.14) : Color.white.opacity(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(selected ? Theme.accent : Color.white.opacity(0.08),
+                                  lineWidth: selected ? 1.5 : 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.45 : 1)
     }
 
     private var installStatePill: some View {

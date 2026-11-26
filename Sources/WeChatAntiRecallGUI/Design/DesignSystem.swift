@@ -1,13 +1,22 @@
 import SwiftUI
 
 enum Theme {
-    static let accent = Color(red: 0.11, green: 0.64, blue: 0.40)   // calm, tasteful green
-    static let corner: CGFloat = 14
-    static let cardPadding: CGFloat = 18
+    // Brand teal — taken from the app icon's rotating arrow.
+    static let accent = Color(red: 0.055, green: 0.68, blue: 0.49)
+    static let accentBright = Color(red: 0.10, green: 0.80, blue: 0.58)
+    static let corner: CGFloat = 16
+    static let cardPadding: CGFloat = 20
     static let gap: CGFloat = 14
+
+    // Charcoal surfaces matching the icon background. The whole window is
+    // dark-branded (preferredColorScheme(.dark) in ContentView).
+    static let sidebar = Color(red: 0.125, green: 0.14, blue: 0.15)
+    static let surface = Color(red: 0.15, green: 0.165, blue: 0.175)
+    static let surfaceStroke = Color.white.opacity(0.07)
+    static let chipBackground = Color.white.opacity(0.08)
 }
 
-// A soft, adaptive card surface. No heavy shadows — quiet and native.
+// A dark, quiet card surface.
 struct Card<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -17,12 +26,27 @@ struct Card<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: Theme.corner, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .fill(Theme.surface)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.corner, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+                    .strokeBorder(Theme.surfaceStroke, lineWidth: 1)
             )
+    }
+}
+
+// A monospaced capsule for build numbers and other technical values.
+struct MonoChip: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption.monospaced().weight(.medium))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Theme.chipBackground))
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
     }
 }
 
@@ -51,7 +75,7 @@ struct StatusPill: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 4)
         .foregroundStyle(color)
-        .background(Capsule().fill(color.opacity(0.14)))
+        .background(Capsule().fill(color.opacity(0.16)))
     }
 }
 
@@ -149,7 +173,11 @@ struct BannerView: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: Theme.corner, style: .continuous)
-                .fill(color.opacity(0.10))
+                .fill(color.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.corner, style: .continuous)
+                .strokeBorder(color.opacity(0.25), lineWidth: 1)
         )
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 enum NavSection: String, CaseIterable, Identifiable {
     case home
@@ -44,16 +45,20 @@ struct ContentView: View {
             Divider()
             detail
         }
+        .preferredColorScheme(.dark)   // dark-branded, matching the app icon
         .onAppear { state.onAppear() }
     }
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: "shield.lefthalf.filled")
-                    .font(.title2)
-                    .foregroundStyle(Theme.accent)
-                Text("微信防撤回").font(.headline)
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 36, height: 36)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                Text("微信防撤回")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
             }
             .padding(.horizontal, 16)
             .padding(.top, 18)
@@ -74,7 +79,7 @@ struct ContentView: View {
                 .padding(.vertical, 12)
         }
         .frame(width: 210)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Theme.sidebar)
     }
 
     @ViewBuilder
@@ -95,7 +100,7 @@ struct ContentView: View {
             LogDrawer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .underPageBackgroundColor))
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 

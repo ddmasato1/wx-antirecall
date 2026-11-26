@@ -70,20 +70,25 @@ struct PermissionsView: View {
 
     private func permissionCard(icon: String, title: String, body text: String, buttonTitle: String, url: String) -> some View {
         Card {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: icon).foregroundStyle(Theme.accent)
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 38, height: 38)
+                    .background(Circle().fill(Theme.accent.opacity(0.14)))
+
+                VStack(alignment: .leading, spacing: 10) {
                     SectionLabel(text: title)
+                    Text(text)
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button {
+                        if let u = URL(string: url) { NSWorkspace.shared.open(u) }
+                    } label: {
+                        Label(buttonTitle, systemImage: "arrow.up.forward.app")
+                    }
+                    .buttonStyle(.bordered)
                 }
-                Text(text)
-                    .font(.callout).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button {
-                    if let u = URL(string: url) { NSWorkspace.shared.open(u) }
-                } label: {
-                    Label(buttonTitle, systemImage: "arrow.up.forward.app")
-                }
-                .buttonStyle(.bordered)
             }
         }
     }
