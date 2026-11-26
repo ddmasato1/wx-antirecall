@@ -19,6 +19,20 @@ final class SilentOnlyPatchConfigTests: XCTestCase {
         XCTAssertEqual(configs.map(\.version), ["270390", "270416", "270601"])
     }
 
+    /// The GUI's「支持的版本」page renders "微信 x.x.x - build" from the `wechatVersion`
+    /// annotation; the CLI ignores the extra key, so this only guards the UI data.
+    func testEachBuildAnnotatesWeChatVersion() throws {
+        let data = try Data(contentsOf: catalogURL)
+        let array = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        let expected: [String: String] = ["270390": "4.2.0", "270416": "4.2.0", "270601": "4.2.1"]
+        XCTAssertEqual(array.count, expected.count)
+        for entry in array {
+            let build = try XCTUnwrap(entry["version"] as? String)
+            XCTAssertEqual(entry["wechatVersion"] as? String, expected[build],
+                           "build \(build) 缺少或拥有错误的 wechatVersion 标注")
+        }
+    }
+
     func testEachBuildContainsOnlyRevokeEntry() throws {
         let configs = try JSONDecoder().decode([VersionConfig].self, from: Data(contentsOf: catalogURL))
         let expected: [String: UInt64] = ["270390": 0x461413c, "270416": 0x4666e98, "270601": 0x413be8c]

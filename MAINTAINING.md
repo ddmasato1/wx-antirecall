@@ -10,7 +10,7 @@
   - `270390`：`0x461413c`
   - `270416`：`0x4666e98`
 - 没有 dylib 注入，没有运行时 hook，没有 `revoke-tip` / `runtime-tip` / `update` target。
-- `patches.json.sha256` 必须与 `patches.json` 匹配；改动补丁数据后运行 `Scripts/hash-patches.sh`。当前校验和：`0f7545143312af504c59b0f89542e081b86c25fa31b8e77da6d8f642e95c9b06`。
+- `patches.json.sha256` 必须与 `patches.json` 匹配；改动补丁数据后运行 `Scripts/hash-patches.sh`。当前校验和：`e68497473c8690070f10713bbdf5837fe5cc8d9893897aea0262a4d87056876c`。
 
 ## 目录与职责
 

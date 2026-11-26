@@ -2,7 +2,7 @@ import SwiftUI
 
 enum NavSection: String, CaseIterable, Identifiable {
     case home
-    case restore
+    case versions
     case permissions
 
     var id: String { rawValue }
@@ -10,7 +10,7 @@ enum NavSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .home: return "首页"
-        case .restore: return "恢复 / 卸载"
+        case .versions: return "支持的版本"
         case .permissions: return "权限与帮助"
         }
     }
@@ -18,7 +18,7 @@ enum NavSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .home: return "house.fill"
-        case .restore: return "arrow.uturn.backward.circle.fill"
+        case .versions: return "list.bullet.rectangle.fill"
         case .permissions: return "lock.shield.fill"
         }
     }
@@ -53,10 +53,7 @@ struct ContentView: View {
                 Image(systemName: "shield.lefthalf.filled")
                     .font(.title2)
                     .foregroundStyle(Theme.accent)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("微信防撤回").font(.headline)
-                    Text("270390 / 270416 / 270601 · 防撤回").font(.caption).foregroundStyle(.secondary)
-                }
+                Text("微信防撤回").font(.headline)
             }
             .padding(.horizontal, 16)
             .padding(.top, 18)
@@ -87,7 +84,7 @@ struct ContentView: View {
                 Group {
                     switch selectedSection {
                     case .home: HomeView()
-                    case .restore: RestoreView()
+                    case .versions: SupportedVersionsView()
                     case .permissions: PermissionsView()
                     }
                 }

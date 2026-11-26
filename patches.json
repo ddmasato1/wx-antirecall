@@ -1,6 +1,7 @@
 [
   {
     "version": "270390",
+    "wechatVersion": "4.2.0",
     "targets": [
       {
         "identifier": "revoke",
@@ -42,6 +43,7 @@
   },
   {
     "version": "270416",
+    "wechatVersion": "4.2.0",
     "targets": [
       {
         "identifier": "revoke",
@@ -59,6 +61,7 @@
   },
   {
     "version": "270601",
+    "wechatVersion": "4.2.1",
     "targets": [
       {
         "identifier": "revoke",

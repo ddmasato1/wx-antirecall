@@ -45,6 +45,26 @@ struct PermissionsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+
+            Card {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.uturn.backward.circle").foregroundStyle(.secondary)
+                        SectionLabel(text: "如何恢复到原版微信")
+                    }
+                    Text("本版本不提供恢复/卸载功能。如需恢复，请完全退出微信后，从微信官网下载受支持版本的安装包重新安装覆盖即可；聊天记录保存在本机，重装不会丢失。")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button {
+                        if let url = URL(string: "https://www.weixin.qq.com/") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        Label("打开微信官网", systemImage: "arrow.up.forward.app")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
         }
     }
 

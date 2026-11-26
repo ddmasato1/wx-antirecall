@@ -496,56 +496,6 @@ final class AppState: ObservableObject {
         }
     }
 
-    // MARK: - Restore
-
-    func restore(session: BackupSession) async {
-        guard !busy else { return }
-        banner = nil
-        if WeChatStatusProbe.isRunning(appPath: appPath) {
-            banner = Banner(kind: .warning, title: "请先退出微信", message: "恢复前需要完全退出微信。")
-            return
-        }
-        let access = Self.probeInstallAccess(appPath: appPath)
-        if access == .blockedByTCC {
-            banner = fullDiskAccessBanner()
-            return
-        }
-
-        busy = true
-        defer { busy = false; busyMessage = "" }
-        busyMessage = access == .writableAsUser ? "正在恢复…" : "正在恢复（需要管理员密码）…"
-
-        var failure: String?
-        for entry in session.entries {
-            let args = ["restore", "--app", appPath, "--binary", entry.binaryRelativePath, "--backup", entry.backupURL.path]
-            let result: CLIResult
-            if access == .writableAsUser {
-                result = await CLIRunner.runUser(BundledPaths.cli, args, onLine: { [weak self] line in
-                    Task { @MainActor in self?.appendLog(line) }
-                })
-            } else {
-                result = await CLIRunner.runAdmin(BundledPaths.cli, args, operation: "restore", onLine: { [weak self] line in
-                    Task { @MainActor in self?.appendLog(line) }
-                })
-            }
-            if result.cancelled {
-                banner = Banner(kind: .info, title: "已取消", message: "你取消了管理员授权。")
-                return
-            }
-            if !result.succeeded {
-                failure = friendlyFailure(result)
-                break
-            }
-        }
-
-        if let failure {
-            banner = Banner(kind: .error, title: "恢复失败", message: failure)
-        } else {
-            banner = Banner(kind: .success, title: "已恢复", message: "已从备份还原。请完全退出并重新打开微信。")
-            await refresh(preserveBanner: true)
-        }
-    }
-
     // MARK: - Logging & helpers
 
     func appendLog(_ line: String) {

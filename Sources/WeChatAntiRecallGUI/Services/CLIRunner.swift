@@ -11,7 +11,7 @@ struct CLIResult {
 }
 
 // Runs the bundled `wechat-antirecall` CLI. Unprivileged commands (versions, dry-run)
-// go through `runUser`; privileged ones (install/restore) go through `runAdmin`, which
+// go through `runUser`; privileged ones (install) go through `runAdmin`, which
 // prompts once for an admin password via osascript.
 enum CLIRunner {
     // MARK: - Unprivileged
