@@ -4,12 +4,17 @@
 
 ## 不可变事实
 
-- 支持矩阵只有两项：`270390`（微信 4.2.0.54）和 `270416`（本机 4.2.0）。
-- `patches.json` 每个条目里只有一个 target：`revoke`。
-- `revoke` 只有一条 arm64 补丁：`Contents/Resources/wechat.dylib`，`40100034` → `82000014`：
-  - `270390`：`0x461413c`
-  - `270416`：`0x4666e98`
-- 没有 dylib 注入，没有运行时 hook，没有 `revoke-tip` / `runtime-tip` / `update` target。
+- 支持矩阵三项：`270390`（微信 4.2.0.54）、`270416`（微信 4.2.0）、`270601`（微信 4.2.1）。`patches.json` 的 `wechatVersion` 键供 GUI「支持的版本」页展示，CLI 解码时忽略。
+- target 只有 `revoke`（静默）与 `revoke-tip`（提示）两种；270390 / 270601 两者都有，270416 只有 `revoke`。
+- `revoke` 补丁（`Contents/Resources/wechat.dylib`）：
+  - `270390`：`0x461413c`，`40100034` → `82000014`
+  - `270416`：`0x4666e98`，`40100034` → `82000014`
+  - `270601`：`0x413be8c`，`00180034` → `1F2003D5`（NOP）
+- `revoke-tip` 补丁（先恢复入口原值，再改写 newmsgid 写入为 `str xzr`）：
+  - `270390`：`0x461413c` 恢复 `40100034` + `0x4614904` `60E600F9` → `7FE600F9`（两处同函数，地址耦合）
+  - `270601`：`0x413c238` `60E600F9` → `7FE600F9`（与静默点地址独立）
+- 没有 dylib 注入，没有运行时 hook，没有 `runtime-tip` / `update` target。
+- GUI 没有「恢复 / 卸载」界面（已删）；`restore` 只存在于 CLI，作为开发者自救通道。
 - `patches.json.sha256` 必须与 `patches.json` 匹配；改动补丁数据后运行 `Scripts/hash-patches.sh`。当前校验和：`e68497473c8690070f10713bbdf5837fe5cc8d9893897aea0262a4d87056876c`。
 
 ## 目录与职责
@@ -40,9 +45,9 @@ CLI 与 GUI 的 JSON schema 分别在 `JSONOutput.swift` 与 `Model/UITypes.swif
 1. 把入口 `cbz` 恢复成原值 `40100034`（expected 允许 `40100034` / `82000014` 两种前置态）。
 2. 把 `newMsgId` 字段写入 `str x0,[x19,#0x1c8]`（`60E600F9`）改成 `str xzr`（`7FE600F9`）。
 
-微信照常生成原生撤回提示，但按 newMsgId 定位不到原消息，所以消息保留。`--with-tip` 只选 `revoke-tip` target，与 `revoke` 互斥（两者都改 `0x461413c`，绝不能同时安装）。切换模式会新建一份备份，恢复时请在列表里选最早的那份（原始字节）。混合态（`alreadyPatched` + `wouldPatch`）在 `InstallState.classify` 里判为「未开启」，属于正常的模式切换中间态。
+微信照常生成原生撤回提示，但按 newMsgId 定位不到原消息，所以消息保留。`--with-tip` 只选 `revoke-tip` target，与 `revoke` 互斥（270390 两者都动 `0x461413c`，绝不能同时安装；270601 地址独立，互斥是模式语义层面的约定）。切换模式会新建一份备份。**GUI 已删除恢复界面**：需要还原时用 CLI `restore`（选最早时间戳的备份即原始字节），或直接重装官网版微信。混合态（`alreadyPatched` + `wouldPatch`）在 `InstallState.classify` 里判为「未开启」，属于正常的模式切换中间态。
 
-270416 的 `revoke-tip` 地址未定位（缺二进制样本），因此只提供静默模式；GUI 按 `installedBuildTargets` 禁用提示选择器。
+270416 的 `revoke-tip` 地址未定位（缺二进制样本），因此只提供静默模式；GUI 按 `installedBuildTargets` 禁用提示模式卡片。
 
 ## 270601（4.2.1）适配记录（2026-11-26）
 
@@ -55,13 +60,13 @@ CLI 与 GUI 的 JSON schema 分别在 `JSONOutput.swift` 与 `Model/UITypes.swif
 
 ## 新增构建号的定位方法
 
-`revoke` 补丁的本质是把 `parseRevokeXML` 入口处的一条 `cbz w0, #imm`（字节 `40100034`）改成 `b`（`82000014`），跳过撤回时删除原消息的逻辑。新增构建时：
+`revoke` 补丁的本质是把撤回解析入口处的一条 `cbz w0, #imm` 改成跳过撤回删除逻辑（经典版改 `b`：`40100034`→`82000014`；重构版改 `NOP`：如 270601 的 `00180034`→`1F2003D5`）。新增构建时：
 
 1. 提取 arm64 切片，解析 `LC_FUNCTION_STARTS`。
 2. 搜索 `40100034`，每个命中映射到所在函数，核对几何特征：函数 `0x111c`（或重编译后的 `0x1164`）字节、分支在入口 `+0x270`（重编译后 `+0x278`）、`str x0,[x19,#0x1c8]`（`60e600f9`）在 `+0xa10`（重编译后 `+0xa40`）、分支解码目标与 `82000014` 一致。
 3. 核对唯一直接调用点位于入口 `-0x84`（重编译后 `-0x80`）。
 4. 在整片中确保满足以上特征的候选唯一。
-5. 写进 `patches.json` 后重算 `patches.json.sha256`，并用 `install --dry-run --json` 在真实 dylib 上确认 `wouldPatch`。
+5. 写进 `patches.json` 后重算 `patches.json.sha256`，并用 `install --dry-run --json` 在真实 dylib 上确认 `wouldPatch`；同时补上 `wechatVersion` 键供 GUI 展示。若解析器被重构、经典特征全部落空，参照下方「270601 适配记录」的骨架对齐方法。
 
 270416 的样本指纹（未修改）：
 
@@ -86,4 +91,6 @@ bash Scripts/hash-patches.sh
 
 已在 270416 的 App 副本上完成：`wouldPatch` 检测 → 实际写入（`40100034`→`82000014`）→ 生成备份 → 重复安装返回 `alreadyPatched` → `codesign --verify --deep --strict` 通过 → 从备份恢复（`82000014`→`40100034`）并重签名通过。这一步使用临时副本跳过本机沙箱对 Swift 启动 `/bin/ps` 的 EPERM 限制，产品代码未改。
 
-发布：`git tag vX.Y.Z && git push --tags`，release workflow 会构建 `.app`、生成 DMG 并发布。发布说明里不要写「拉取最新补丁数据」。
+真机验证状态：270390（静默 + 提示）与 270601（静默 + 提示）已在本机完成真实账号撤回实测；270416 未做真机实测。
+
+发布：本仓库无 CI release workflow，发布产物用 `bash Scripts/make-app.sh` 本地构建 `dist/WeChatAntiRecall.app`；需要打 tag 时 `git tag vX.Y.Z && git push origin --tags`（`origin` 是私有仓库，`upstream` 为上游只读）。发布说明里不要写「拉取最新补丁数据」。
