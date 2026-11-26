@@ -30,13 +30,13 @@ NSGradient(starting: bgTop, ending: bgBottom)?.draw(in: rect, angle: -90)
 // White chat bubble: filled circle + small tail on the right side.
 let cx = size * 0.5
 let cy = size * 0.5
-let r = size * 0.295
+let r = size * 0.245
 let bubble = NSBezierPath()
 bubble.appendArc(withCenter: NSPoint(x: cx, y: cy), radius: r,
                  startAngle: 0, endAngle: 360, clockwise: false)
 let tail = NSBezierPath()
 tail.move(to: NSPoint(x: cx + r * 0.90, y: cy + r * 0.34))
-tail.line(to: NSPoint(x: cx + r * 1.46, y: cy + r * 0.12))
+tail.line(to: NSPoint(x: cx + r * 1.38, y: cy + r * 0.12))
 tail.line(to: NSPoint(x: cx + r * 0.86, y: cy - r * 0.40))
 tail.close()
 NSColor.white.set()
@@ -46,8 +46,8 @@ tail.fill()
 // Teal counterclockwise rotate arrow inside the bubble.
 // Arc spans top -> left -> bottom -> right with a gap at the top-right;
 // the arrowhead lands on the right side moving upward (undo motion).
-let aR = size * 0.16
-let stroke = size * 0.056
+let aR = size * 0.132
+let stroke = size * 0.048
 let arc = NSBezierPath()
 arc.appendArc(withCenter: NSPoint(x: cx, y: cy), radius: aR,
               startAngle: 80, endAngle: 380, clockwise: false)
@@ -63,10 +63,10 @@ let ex = cx + aR * cos(endRad)
 let ey = cy + aR * sin(endRad)
 let tx = -sin(endRad), ty = cos(endRad)          // tangent (CCW motion)
 let nx = cos(endRad), ny = sin(endRad)           // outward normal
-let headLen = size * 0.115
-let headHalf = size * 0.075
+let headLen = size * 0.095
+let headHalf = size * 0.062
 let tipX = ex + tx * headLen, tipY = ey + ty * headLen
-let baseBack = size * 0.02
+let baseBack = size * 0.017
 let head = NSBezierPath()
 head.move(to: NSPoint(x: tipX, y: tipY))
 head.line(to: NSPoint(x: ex - nx * headHalf - tx * baseBack,
