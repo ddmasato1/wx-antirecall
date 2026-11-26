@@ -1,7 +1,5 @@
 # 微信防撤回（静默版）
 
-基于 [fzlzjerry/wechat-antirecall](https://github.com/fzlzjerry/wechat-antirecall) 的功能删减分支。
-
 **只做一件事：让受支持构建里别人撤回的消息原样保留。** 可选两种效果：静默保留，或保留的同时显示微信原生的「xxx 撤回了一条消息」提示。
 
 ## 支持的版本
@@ -137,3 +135,7 @@ open dist/WeChatAntiRecall.app
 - 本机若只有 Command Line Tools 而没有完整 Xcode，`swift test` 会因缺少 XCTest 模块失败；`swift build` 正常。
 
 维护说明见 [MAINTAINING.md](MAINTAINING.md)。
+
+---
+
+参考项目：[fzlzjerry/wechat-antirecall](https://github.com/fzlzjerry/wechat-antirecall)
