@@ -123,8 +123,8 @@ struct HomeView: View {
                     installStatePill
                 }
                 Text(state.withTip
-                     ? "别人撤回的消息保留，同时显示微信原生的「撤回了一条消息」提示。仅构建 270390 支持。"
-                     : "别人撤回的消息原样留下，不显示任何提示。支持微信构建 270390 / 270416。")
+                     ? "别人撤回的消息保留，同时显示微信原生的「撤回了一条消息」提示。支持构建 270390 / 270601。"
+                     : "别人撤回的消息原样留下，不显示任何提示。支持微信构建 270390 / 270416 / 270601。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
 
@@ -217,7 +217,7 @@ struct HomeView: View {
         Card {
             VStack(alignment: .leading, spacing: 12) {
                 SectionLabel(text: "此版本暂不支持")
-                Text("当前微信构建号 \(build) 不在本精简版支持的范围内。本工具仅支持 270390 / 270416 的静默防撤回，不会拉取其他版本的补丁数据。")
+                Text("当前微信构建号 \(build) 不在本精简版支持的范围内。本工具仅支持 270390 / 270416 / 270601 的防撤回，不会拉取其他版本的补丁数据。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

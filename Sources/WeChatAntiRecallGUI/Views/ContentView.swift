@@ -55,7 +55,7 @@ struct ContentView: View {
                     .foregroundStyle(Theme.accent)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("微信防撤回").font(.headline)
-                    Text("270390 / 270416 · 静默防撤回").font(.caption).foregroundStyle(.secondary)
+                    Text("270390 / 270416 / 270601 · 防撤回").font(.caption).foregroundStyle(.secondary)
                 }
             }
             .padding(.horizontal, 16)

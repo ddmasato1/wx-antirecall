@@ -386,7 +386,7 @@ struct CLI {
           wechat-antirecall restore  --backup <path> [--binary Contents/Resources/wechat.dylib] [--app /Applications/WeChat.app] [--skip-resign]
 
         Notes:
-          Supported builds: 270390 (silent + --with-tip native recall notice), 270416 (silent only).
+          Supported builds: 270390 and 270601 (silent + --with-tip native recall notice), 270416 (silent only).
           --with-tip keeps the message AND shows WeChat's own "recalled a message" notice.
           Unknown WeChat builds are refused instead of guessed.
           --json emits machine-readable output (used by the GUI); on error it prints a JSON

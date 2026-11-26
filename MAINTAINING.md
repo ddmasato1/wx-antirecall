@@ -10,7 +10,7 @@
   - `270390`：`0x461413c`
   - `270416`：`0x4666e98`
 - 没有 dylib 注入，没有运行时 hook，没有 `revoke-tip` / `runtime-tip` / `update` target。
-- `patches.json.sha256` 必须与 `patches.json` 匹配；改动补丁数据后运行 `Scripts/hash-patches.sh`。当前校验和：`c4bb80b7f25abe53786d0a4b1819d5dbec207a896515505a19fe96151fa5488b`。
+- `patches.json.sha256` 必须与 `patches.json` 匹配；改动补丁数据后运行 `Scripts/hash-patches.sh`。当前校验和：`0f7545143312af504c59b0f89542e081b86c25fa31b8e77da6d8f642e95c9b06`。
 
 ## 目录与职责
 
@@ -43,6 +43,15 @@ CLI 与 GUI 的 JSON schema 分别在 `JSONOutput.swift` 与 `Model/UITypes.swif
 微信照常生成原生撤回提示，但按 newMsgId 定位不到原消息，所以消息保留。`--with-tip` 只选 `revoke-tip` target，与 `revoke` 互斥（两者都改 `0x461413c`，绝不能同时安装）。切换模式会新建一份备份，恢复时请在列表里选最早的那份（原始字节）。混合态（`alreadyPatched` + `wouldPatch`）在 `InstallState.classify` 里判为「未开启」，属于正常的模式切换中间态。
 
 270416 的 `revoke-tip` 地址未定位（缺二进制样本），因此只提供静默模式；GUI 按 `installedBuildTargets` 禁用提示选择器。
+
+## 270601（4.2.1）适配记录（2026-11-26）
+
+- 解析器：`0x413bca8` 起 `0xa30` 字节（重构，270390 为 `0x1164`）。返回值在 `w19`（1=解析成功），出口统一 `0x413bd58/bd5c`。
+- 静默补丁：`0x413be8c` 的 `cbz w0, 0x413c18c`（`00180034`）→ `NOP`（`1F2003D5`）。该闸门是 `revokemsg` 节点处理块在函数内的唯一入口；NOP 后撤回消息走「节点缺失 → 记日志 → 返回 0」的现成路径，与其他 sysmsg 类型一致。`expected` 允许 `00180034` / `1F2003D5` 两种前置态。
+- 提示补丁：`0x413c238` `str x0,[x19,#0x1c8]`（`60E600F9`，`newmsgid` 节点经 `0x40245f4` uint64 解析后写入）→ `str xzr`（`7FE600F9`）。已确认全函数仅此一处 `#0x1c8` 写入。
+- 与 270390 不同：两 target 地址独立，模式切换不再有「同一地址两种状态」的耦合。
+- 残留风险：解析器中存在 `revoketime` 节点存在时走 `0x413c324` 的支路（解析 content/replacemsg，不写 newmsgid）。真机复验时若发现消息仍被删除，优先检查该支路是否被命中。
+- 定位方法：提取 arm64 薄切片（文件偏移=虚地址），Capstone 全量反汇编，与 270390 已验证函数做骨架对齐（bl 调用 / 分支 / `[x19,#0x1c0-0x1e0]` 字段写入 / adrp+add 字符串引用四类锚点），未使用反编译器。
 
 ## 新增构建号的定位方法
 

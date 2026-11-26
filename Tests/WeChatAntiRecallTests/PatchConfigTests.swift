@@ -16,19 +16,23 @@ final class SilentOnlyPatchConfigTests: XCTestCase {
 
     func testCatalogHasOnlySupportedBuilds() throws {
         let configs = try JSONDecoder().decode([VersionConfig].self, from: Data(contentsOf: catalogURL))
-        XCTAssertEqual(configs.map(\.version), ["270390", "270416"])
+        XCTAssertEqual(configs.map(\.version), ["270390", "270416", "270601"])
     }
 
     func testEachBuildContainsOnlyRevokeEntry() throws {
         let configs = try JSONDecoder().decode([VersionConfig].self, from: Data(contentsOf: catalogURL))
-        let expected: [String: UInt64] = ["270390": 0x461413c, "270416": 0x4666e98]
+        let expected: [String: UInt64] = ["270390": 0x461413c, "270416": 0x4666e98, "270601": 0x413be8c]
+        let expectedOriginal: [String: [String]] = [
+            "270390": ["40100034"], "270416": ["40100034"], "270601": ["00180034", "1F2003D5"]]
+        let expectedPatch: [String: String] =
+            ["270390": "82000014", "270416": "82000014", "270601": "1F2003D5"]
 
         for config in configs {
             XCTAssertNotNil(expected[config.version])
             let identifiers = config.targets.map(\.identifier)
             XCTAssertTrue(identifiers.contains("revoke"))
             // The native recall notice needs a second, version-specific field write.
-            XCTAssertEqual(identifiers.contains("revoke-tip"), config.version == "270390")
+            XCTAssertEqual(identifiers.contains("revoke-tip"), ["270390", "270601"].contains(config.version))
 
             let target = try XCTUnwrap(config.targets.first(where: { $0.identifier == "revoke" }))
             XCTAssertEqual(target.binaryPath, "Contents/Resources/wechat.dylib")
@@ -37,8 +41,8 @@ final class SilentOnlyPatchConfigTests: XCTestCase {
             let entry = try XCTUnwrap(target.entries.first)
             XCTAssertEqual(entry.arch, .arm64)
             XCTAssertEqual(entry.address, expected[config.version])
-            XCTAssertEqual(entry.expectedBytes.map(\.hexString), ["40100034"])
-            XCTAssertEqual(entry.patchBytes.hexString, "82000014")
+            XCTAssertEqual(entry.expectedBytes.map(\.hexString), expectedOriginal[config.version])
+            XCTAssertEqual(entry.patchBytes.hexString, expectedPatch[config.version])
         }
     }
 }
