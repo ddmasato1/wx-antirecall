@@ -1,6 +1,9 @@
 #!/bin/bash
 # Generates Resources/AppIcon.icns from a rendered 1024px PNG using only system tools
 # (swift + sips + iconutil). Run once; the .icns is checked into the repo.
+#
+# Current design: dark charcoal squircle, white chat bubble with a teal
+# counterclockwise rotate arrow inside ("recalled message is being undone").
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,30 +18,64 @@ let size = 1024.0
 let image = NSImage(size: NSSize(width: size, height: size))
 image.lockFocus()
 
-// Rounded-rect background with a calm green gradient.
+// Rounded-rect background with a dark charcoal gradient.
 let rect = NSRect(x: 0, y: 0, width: size, height: size)
 let corner = size * 0.2237   // macOS icon superellipse-ish radius
-let path = NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner)
-path.addClip()
-let top = NSColor(calibratedRed: 0.16, green: 0.72, blue: 0.47, alpha: 1)
-let bottom = NSColor(calibratedRed: 0.07, green: 0.52, blue: 0.33, alpha: 1)
-NSGradient(starting: top, ending: bottom)?.draw(in: rect, angle: -90)
+let bgPath = NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner)
+bgPath.addClip()
+let bgTop = NSColor(calibratedRed: 0.25, green: 0.27, blue: 0.29, alpha: 1)
+let bgBottom = NSColor(calibratedRed: 0.12, green: 0.13, blue: 0.15, alpha: 1)
+NSGradient(starting: bgTop, ending: bgBottom)?.draw(in: rect, angle: -90)
 
-// White shield glyph centered.
-let config = NSImage.SymbolConfiguration(pointSize: size * 0.5, weight: .semibold)
-if let symbol = NSImage(systemSymbolName: "shield.lefthalf.filled", accessibilityDescription: nil)?
-    .withSymbolConfiguration(config) {
-    let tinted = NSImage(size: symbol.size)
-    tinted.lockFocus()
-    NSColor.white.set()
-    let r = NSRect(origin: .zero, size: symbol.size)
-    symbol.draw(in: r)
-    r.fill(using: .sourceAtop)
-    tinted.unlockFocus()
-    let w = symbol.size.width, h = symbol.size.height
-    let drawRect = NSRect(x: (size - w) / 2, y: (size - h) / 2, width: w, height: h)
-    tinted.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 0.95)
-}
+// White chat bubble: filled circle + small tail on the right side.
+let cx = size * 0.5
+let cy = size * 0.5
+let r = size * 0.295
+let bubble = NSBezierPath()
+bubble.appendArc(withCenter: NSPoint(x: cx, y: cy), radius: r,
+                 startAngle: 0, endAngle: 360, clockwise: false)
+let tail = NSBezierPath()
+tail.move(to: NSPoint(x: cx + r * 0.90, y: cy + r * 0.34))
+tail.line(to: NSPoint(x: cx + r * 1.46, y: cy + r * 0.12))
+tail.line(to: NSPoint(x: cx + r * 0.86, y: cy - r * 0.40))
+tail.close()
+NSColor.white.set()
+bubble.fill()
+tail.fill()
+
+// Teal counterclockwise rotate arrow inside the bubble.
+// Arc spans top -> left -> bottom -> right with a gap at the top-right;
+// the arrowhead lands on the right side moving upward (undo motion).
+let aR = size * 0.16
+let stroke = size * 0.056
+let arc = NSBezierPath()
+arc.appendArc(withCenter: NSPoint(x: cx, y: cy), radius: aR,
+              startAngle: 80, endAngle: 380, clockwise: false)
+arc.lineWidth = stroke
+arc.lineCapStyle = .round
+let teal = NSColor(calibratedRed: 0.055, green: 0.68, blue: 0.49, alpha: 1)
+teal.set()
+arc.stroke()
+
+// Arrowhead triangle at the arc end (angle 20 deg), tangent pointing CCW.
+let endRad = 20.0 * Double.pi / 180.0
+let ex = cx + aR * cos(endRad)
+let ey = cy + aR * sin(endRad)
+let tx = -sin(endRad), ty = cos(endRad)          // tangent (CCW motion)
+let nx = cos(endRad), ny = sin(endRad)           // outward normal
+let headLen = size * 0.115
+let headHalf = size * 0.075
+let tipX = ex + tx * headLen, tipY = ey + ty * headLen
+let baseBack = size * 0.02
+let head = NSBezierPath()
+head.move(to: NSPoint(x: tipX, y: tipY))
+head.line(to: NSPoint(x: ex - nx * headHalf - tx * baseBack,
+                      y: ey - ny * headHalf - ty * baseBack))
+head.line(to: NSPoint(x: ex + nx * headHalf - tx * baseBack,
+                      y: ey + ny * headHalf - ty * baseBack))
+head.close()
+teal.set()
+head.fill()
 
 image.unlockFocus()
 
