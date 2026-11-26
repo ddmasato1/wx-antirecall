@@ -22,7 +22,7 @@
 - `Sources/WeChatAntiRecall/CLI.swift`：`versions` / `install` / `restore` 三个命令，Mach-O 补丁引擎、备份、重签名、权限检查。
 - `Sources/WeChatAntiRecall/JSONOutput.swift`：CLI 的 `--json` DTO；`jsonSchemaVersion = 2`。
 - `Sources/WeChatAntiRecallGUI/`：SwiftUI 外壳，只通过子进程调用 CLI，不直接链接 CLI target。
-- `Scripts/make-app.sh`：组装并签名 `dist/WeChatAntiRecall.app`。
+- `Scripts/make-app.sh`：组装并签名 `dist/AntiRecall.app`。
 - `Tests/WeChatAntiRecallTests/`：补丁配置不变量、安装状态判定、签名链路、进程路径判定。
 
 CLI 与 GUI 的 JSON schema 分别在 `JSONOutput.swift` 与 `Model/UITypes.swift`，改动字段时必须同步。
@@ -93,4 +93,4 @@ bash Scripts/hash-patches.sh
 
 真机验证状态：270390（静默 + 提示）与 270601（静默 + 提示）已在本机完成真实账号撤回实测；270416 未做真机实测。
 
-发布：本仓库无 CI release workflow，发布产物用 `bash Scripts/make-app.sh` 本地构建 `dist/WeChatAntiRecall.app`；需要打 tag 时 `git tag vX.Y.Z && git push origin --tags`（`origin` 是私有仓库，`upstream` 为上游只读）。发布说明里不要写「拉取最新补丁数据」。
+发布：本地用 `bash Scripts/make-app.sh` 构建 `dist/AntiRecall.app`。仓库内 `.github/workflows/` 有三个工作流：`ci.yml`（push main / PR 时 swift build + swift test + release 构建）、`release.yml`（push `v*` tag 或手动 workflow_dispatch 时构建 `dist/AntiRecall-<tag>.dmg` 并 `gh release create` 发布）、`claude.yml`（上游遗留，需 `@claude` 触发且依赖 `CLAUDE_CODE_OAUTH_TOKEN` secret，私有仓库未配置时不会生效）。`origin` 是私有仓库 `ddmasato1/wx-antirecall`，`upstream` 为上游只读。发布说明里不要写「拉取最新补丁数据」。

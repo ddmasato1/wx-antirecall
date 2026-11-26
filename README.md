@@ -99,7 +99,7 @@ WXAR_CLI="$(swift build -c release --show-bin-path)/wechat-antirecall"
 ```bash
 bash Scripts/make-icon.sh
 bash Scripts/make-app.sh
-open dist/WeChatAntiRecall.app
+open dist/AntiRecall.app
 ```
 
 打包产物包含 GUI、CLI、`patches.json` 和图标，不再包含 dylib。

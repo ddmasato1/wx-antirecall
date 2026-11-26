@@ -1,17 +1,17 @@
 #!/bin/bash
-# Assembles WeChatAntiRecall.app from SwiftPM build products. Uses only system tools.
+# Assembles AntiRecall.app from SwiftPM build products. Uses only system tools.
 #
 #   ARCHS="arm64"          (default) — matches reality: the silent patches are arm64-only.
 #   ARCHS="arm64 x86_64"   universal — cosmetic.
 #   CODESIGN_ID="-"        (default) — ad-hoc. Set to a Developer ID to sign properly.
 #
-# Output: dist/WeChatAntiRecall.app
+# Output: dist/AntiRecall.app
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-APP_NAME="WeChatAntiRecall"
+APP_NAME="AntiRecall"
 GUI="WeChatAntiRecallGUI"
 CLI="wechat-antirecall"
 BUNDLE_ID="com.github.fzlzjerry.wechatantirecall"
