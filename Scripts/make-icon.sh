@@ -7,14 +7,13 @@
 #
 # ICON GEOMETRY (measured against real macOS app icons):
 #   Chrome / WeChat / Notes / Photos / Messages all draw their artwork in the
-#   centered 80% of the 1024px canvas with 10% transparent margins — that is
-#   the Apple guideline, and full-bleed artwork really does render ~25% larger
-#   in the Dock. But at exactly 80%, our dark background plus a small white
-#   glyph reads as visually smaller/lighter than neighbouring light icons
-#   (dark colours contract, light ones expand). So we deliberately use 88%
-#   artwork (6% margins) and a larger glyph: the square is only ~10% larger
-#   than standard — never "a full size bigger" — while the icon gains the
-#   visual weight of the apps around it.
+#   centered 80% of the 1024px canvas with 10% transparent margins. In the
+#   Dock that is 32pt; full-bleed 100% is ~40pt ("a size bigger") and an 88%
+#   compromise measured 35pt — still visibly larger. The square MUST be
+#   exactly 80%; do NOT tune this value again.
+#   What we can tune is the glyph: the white bubble is intentionally larger
+#   (0.33 of artSize) so the dark icon carries the same visual weight as the
+#   light icons around it, without changing the square's physical size.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -34,8 +33,8 @@ image.lockFocus()
 let canvas = NSRect(x: 0, y: 0, width: size, height: size)
 if let cg = NSGraphicsContext.current?.cgContext { cg.clear(canvas) }
 
-let margin = size * 0.06
-let artSize = size * 0.88
+let margin = size * 0.10
+let artSize = size * 0.80
 let artRect = NSRect(x: margin, y: margin, width: artSize, height: artSize)
 let cx = size * 0.5
 let cy = size * 0.5
