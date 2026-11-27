@@ -5,7 +5,7 @@ import Foundation
 //
 // Every top-level report carries `schemaVersion` so a mismatched CLI/GUI pair is detectable.
 
-let jsonSchemaVersion = 2
+let jsonSchemaVersion = 3
 
 enum JSONOutput {
     static let encoder: JSONEncoder = {
@@ -105,6 +105,47 @@ struct InstallReport: Encodable {
             }
         }
     }
+}
+
+// MARK: - clone --json
+
+struct CloneItemDTO: Encodable {
+    let index: Int
+    let path: String
+    let displayName: String
+    let bundleIdentifier: String
+    let sourceBundleIdentifier: String?
+    let marketingVersion: String
+    let installedBuild: String
+    let patchState: String
+}
+
+struct CloneListReport: Encodable {
+    let schemaVersion: Int
+    let command = "clone.list"
+    let outputDir: String
+    let nextAvailableIndex: Int
+    let clones: [CloneItemDTO]
+}
+
+struct CloneCreateReport: Encodable {
+    let schemaVersion: Int
+    let command = "clone.create"
+    let dryRun: Bool
+    let replaced: Bool
+    let resigned: Bool
+    let patchMode: String
+    let sourceApp: AppInfoDTO
+    let clone: CloneItemDTO
+}
+
+struct CloneRemoveReport: Encodable {
+    let schemaVersion: Int
+    let command = "clone.remove"
+    let dryRun: Bool
+    let removedPath: String
+    let index: Int?
+    let bundleIdentifier: String
 }
 
 // MARK: - error envelope

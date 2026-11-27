@@ -8,7 +8,7 @@ struct GUIError: LocalizedError {
 
 enum GUICLIProtocol {
     // Keep in lockstep with the CLI's jsonSchemaVersion (both ship from the same tree).
-    static let schemaVersion = 2
+    static let schemaVersion = 3
 }
 
 /// Builds the CLI argument list for the only supported operation: anti-recall.
@@ -66,6 +66,31 @@ enum InstallPreflightDisposition: Equatable {
         }) else { return .invalid }
         return states.allSatisfy { $0 == "alreadyPatched" } ? .alreadyInstalled : .installable
     }
+}
+
+enum ClonePatchState: String, Equatable {
+    case none
+    case silent
+    case withTip
+    case unsupported
+    case mismatch
+
+    init(rawState: String) {
+        self = ClonePatchState(rawValue: rawState) ?? .mismatch
+    }
+}
+
+struct CloneInstanceInfo: Identifiable, Equatable {
+    let index: Int
+    let path: String
+    let displayName: String
+    let bundleIdentifier: String
+    let marketingVersion: String
+    let installedBuild: String
+    let patchState: ClonePatchState
+    var isRunning: Bool
+
+    var id: String { path }
 }
 
 enum BannerKind {

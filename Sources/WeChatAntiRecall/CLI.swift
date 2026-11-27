@@ -2,8 +2,8 @@ import Foundation
 import CoreFoundation
 import Darwin
 
-private let defaultAppPath = "/Applications/WeChat.app"
-private let defaultBinaryPath = "Contents/MacOS/WeChat"
+let defaultAppPath = "/Applications/WeChat.app"
+let defaultBinaryPath = "Contents/MacOS/WeChat"
 private let lcSegment64: UInt32 = 0x19
 private let lcLoadDylib: UInt32 = 0xc
 private let mhMagic64: UInt32 = 0xfeedfacf
@@ -126,6 +126,13 @@ struct PatchEntry: Decodable, Hashable {
         case expectedBytes = "expected"
     }
 
+    init(arch: CPUArch, address: UInt64, patchBytes: Data, expectedBytes: [Data]) {
+        self.arch = arch
+        self.address = address
+        self.patchBytes = patchBytes
+        self.expectedBytes = expectedBytes
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         arch = try container.decode(CPUArch.self, forKey: .arch)
@@ -225,10 +232,12 @@ struct CLI {
             try install(rest)
         case "restore":
             try restore(rest)
+        case "clone":
+            try clone(rest)
         case "help", "--help", "-h":
             printUsage()
         default:
-            throw ToolError.usage("未知命令：\(command)。本精简版仅支持 versions、install、restore。运行 `wechat-antirecall help` 查看用法。")
+            throw ToolError.usage("未知命令：\(command)。支持命令：versions、install、restore、clone。运行 `wechat-antirecall help` 查看用法。")
         }
     }
 
@@ -378,17 +387,21 @@ struct CLI {
 
     private func printUsage() {
         print("""
-        wechat-antirecall (recall-only build: silent / native tip)
+        wechat-antirecall (anti-recall + multi-instance clone)
 
         Usage:
           wechat-antirecall versions [--app /Applications/WeChat.app] [--config patches.json] [--json]
           wechat-antirecall install  [--app /Applications/WeChat.app] [--config patches.json] [--with-tip] [--dry-run] [--no-backup] [--skip-resign] [--json]
           wechat-antirecall restore  --backup <path> [--binary Contents/Resources/wechat.dylib] [--app /Applications/WeChat.app] [--skip-resign]
+          wechat-antirecall clone list   [--output-dir /Applications] [--config patches.json] [--json]
+          wechat-antirecall clone create [--app /Applications/WeChat.app] [--output-dir /Applications] [--index <N>] [--patch-mode none|silent|with-tip] [--config patches.json] [--replace] [--keep-url-schemes] [--dry-run] [--skip-resign] [--json]
+          wechat-antirecall clone remove --target <path> [--dry-run] [--json]
 
         Notes:
           Supported builds: 270390 and 270601 (silent + --with-tip native recall notice), 270416 (silent only).
           --with-tip keeps the message AND shows WeChat's own "recalled a message" notice.
-          Unknown WeChat builds are refused instead of guessed.
+          `clone` creates standalone WeChat app bundles with isolated bundle IDs and localized names.
+          Unknown WeChat builds are refused for binary patching instead of guessed.
           --json emits machine-readable output (used by the GUI); on error it prints a JSON
           envelope to stdout and still exits non-zero.
         """)
@@ -640,7 +653,7 @@ final class MachOPatcher {
     }
 }
 
-private func loadConfigs(path: String?) throws -> [VersionConfig] {
+func loadConfigs(path: String?) throws -> [VersionConfig] {
     let configURL = try resolveConfigURL(path: path)
     let data = try Data(contentsOf: configURL)
     return try JSONDecoder().decode([VersionConfig].self, from: data)
@@ -676,7 +689,7 @@ private func isSafePreferenceDomain(_ domain: String) -> Bool {
     }
 }
 
-private func readAppInfo(appPath: String) throws -> AppInfo {
+func readAppInfo(appPath: String) throws -> AppInfo {
     let appURL = URL(fileURLWithPath: appPath)
     var isDirectory = ObjCBool(false)
     guard FileManager.default.fileExists(atPath: appURL.path, isDirectory: &isDirectory), isDirectory.boolValue else {
@@ -719,7 +732,7 @@ private func readAppInfo(appPath: String) throws -> AppInfo {
     )
 }
 
-private func configForInstalledApp(_ appInfo: AppInfo, configs: [VersionConfig]) throws -> VersionConfig {
+func configForInstalledApp(_ appInfo: AppInfo, configs: [VersionConfig]) throws -> VersionConfig {
     if let config = configs.first(where: { $0.version == appInfo.buildVersion }) {
         return config
     }
@@ -762,12 +775,15 @@ private func validateRestorePermissions(appInfo: AppInfo, binaryURL: URL, skipRe
     }
 }
 
-private func ensureAppNotRunning(appInfo: AppInfo, dryRun: Bool) throws {
+func ensureAppNotRunning(appInfo: AppInfo, dryRun: Bool) throws {
+    try ensureAppAtURLNotRunning(appInfo.appURL, dryRun: dryRun)
+}
+
+func ensureAppAtURLNotRunning(_ appURL: URL, dryRun: Bool) throws {
     guard !dryRun else {
         return
     }
 
-    let appURL = appInfo.appURL
     let process = Process()
     let pipe = Pipe()
     process.executableURL = URL(fileURLWithPath: "/bin/ps")
@@ -798,7 +814,7 @@ private func ensureAppNotRunning(appInfo: AppInfo, dryRun: Bool) throws {
     }
 
     if !runningPIDs.isEmpty {
-        throw ToolError.appIsRunning(path: appInfo.appURL.path, pids: runningPIDs)
+        throw ToolError.appIsRunning(path: appURL.path, pids: runningPIDs)
     }
 }
 
@@ -850,7 +866,7 @@ enum AppSignaturePolicy {
     }
 }
 
-private func validateAppSignatureIsPatchable(appURL: URL) throws {
+func validateAppSignatureIsPatchable(appURL: URL) throws {
     let hasMASReceipt = FileManager.default.fileExists(
         atPath: appURL.appendingPathComponent("Contents/_MASReceipt/receipt").path
     )
@@ -883,7 +899,7 @@ private func requireWritable(_ url: URL, operation: String) throws {
     Darwin.close(fd)
 }
 
-private func requireDirectoryWritable(_ url: URL, operation: String) throws {
+func requireDirectoryWritable(_ url: URL, operation: String) throws {
     // Same reason as requireWritable: use a real create/delete probe rather than access().
     let probeURL = url.appendingPathComponent(".wechat-antirecall-write-test-\(UUID().uuidString)")
     do {

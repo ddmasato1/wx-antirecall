@@ -1,6 +1,6 @@
-# AntiRecall（微信防撤回）
+# AntiRecall（微信防撤回 & 多开）
 
-一款轻量、纯离线的 macOS 微信防撤回工具，仅做一件事：**让别人撤回的消息原样保留**。
+一款轻量、纯离线的 macOS 微信防撤回与多开分身管理工具，专注做好两件事：**让别人撤回的消息原样保留**，以及**安全创建独立微信多开分身**。
 
 | 首页 | 支持版本 | 权限帮助 |
 | :---: | :---: | :---: |
@@ -12,6 +12,10 @@
 - **双模式切换**：
   - **静默保留**（默认）：消息无痕留下，界面无任何提示。
   - **显示撤回提示**：保留原消息的同时，显示微信原生「撤回了一条消息」提示。
+- **独立微信多开**：
+  - 一键生成独立 Bundle ID 的多开应用包（`微信 2`、`微信 3`…），无需退出正在运行的主微信即可创建，支持多账号同时在线且聊天数据彼此独立。
+  - 同步改写中文/英文 `InfoPlist.strings`，使 Finder、Dock 与菜单栏原生显示「微信 2」等独立名称，并默认剥离 `weixin://` URL Scheme 防止链接误唤起。
+  - 创建或同步重建分身时可按需一并写入静默/提示防撤回补丁；未适配补丁的新版微信仍可正常创建纯净多开分身。
 - **安全离线校验**：内置精确的离线补丁表，不联网拉取未知数据；安装前自动 `dry-run` 预检并备份原文件，重签名后逐项校验 entitlements。
 - **原生 SwiftUI 界面**：紧凑单栏设计，自适应 macOS 亮/暗双色外观，内置运行日志抽屉。
 
@@ -32,6 +36,7 @@
 2. **首次打开**：右键点击 `AntiRecall.app` →「打开」以通过 Gatekeeper 提示。
 3. **完全退出微信**，打开 `AntiRecall`，确认检测到受支持版本后选择拦截模式并点击开启。
 4. 重新打开微信，建议用另一账号发送并撤回一条测试消息以验证效果。
+5. 如需多开，可切换至「**微信多开**」标签页一键新建独立分身（无需退出主微信）。
 
 > [!NOTE]
 > 如安装后遇到写入受阻或微信无法打开，请参考应用内「**权限帮助**」页面授予对应权限（**App 管理** / **完全磁盘访问**）。如需恢复原版微信，完全退出后从[微信官网](https://weixin.qq.com)下载安装包覆盖重装即可（本地聊天记录不会丢失）。
@@ -70,6 +75,15 @@ WXAR_CLI="$(swift build -c release --show-bin-path)/wechat-antirecall"
 "$WXAR_CLI" restore --app /Applications/WeChat.app \
   --binary Contents/Resources/wechat.dylib \
   --backup /Applications/WeChat.app/Contents/Resources/wechat.dylib.wechat-antirecall-backup-YYYYMMDD-HHMMSS
+
+# 查看已创建的微信多开分身及补丁状态
+"$WXAR_CLI" clone list --output-dir /Applications --config ./patches.json
+
+# 创建多开分身（默认从序号 2 递增分配，可选 --patch-mode none|silent|with-tip，加 --replace 可覆盖重建）
+"$WXAR_CLI" clone create --app /Applications/WeChat.app --output-dir /Applications --patch-mode silent --config ./patches.json
+
+# 删除由本工具创建的多开分身（不会删除本地聊天数据）
+"$WXAR_CLI" clone remove --target "/Applications/WeChat 2.app"
 ```
 
 更多底层补丁原理与适配记录见 [MAINTAINING.md](MAINTAINING.md)。

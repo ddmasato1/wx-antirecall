@@ -98,8 +98,8 @@ enum Theme {
     // Layout Metrics
     static let corner: CGFloat = 16
     static let innerCorner: CGFloat = 11
-    static let cardPadding: CGFloat = 18
-    static let gap: CGFloat = 14
+    static let cardPadding: CGFloat = 15
+    static let gap: CGFloat = 12
 }
 
 // MARK: - Window Appearance Configurator
@@ -134,9 +134,9 @@ struct WindowConfigurator: NSViewRepresentable {
 
             if !didInitialResize {
                 didInitialResize = true
-                let targetSize = NSSize(width: 580, height: 680)
-                // Reset oversized legacy frames (e.g. previous 860px dual-column window)
-                if window.frame.width > 680 || window.frame.height < 620 {
+                let targetSize = NSSize(width: 610, height: 560)
+                // Reset oversized or undersized legacy frames so the compact 4-tab layout fits cleanly
+                if window.frame.width > 680 || window.frame.width < 590 || window.frame.height > 640 || window.frame.height < 480 {
                     let oldCenter = NSPoint(x: window.frame.midX, y: window.frame.midY)
                     let newOrigin = NSPoint(
                         x: round(oldCenter.x - targetSize.width * 0.5),
@@ -238,9 +238,9 @@ struct StatusPill: View {
     }
 }
 
-// MARK: - Unified Button Styles
+// MARK: - Unified Button Styles & Segmented Controls
 
-struct PrimaryActionButtonStyle: ButtonStyle {
+struct CompactPrimaryPillButtonStyle: ButtonStyle {
     enum Variant {
         case emerald
         case amber
@@ -260,15 +260,14 @@ struct PrimaryActionButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 14, weight: .semibold))
+            .font(.system(size: 12.5, weight: .semibold))
             .foregroundStyle(isEnabled ? Color.white : Color.secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 11)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 6.5)
             .background(
                 Group {
                     if isEnabled {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        Capsule()
                             .fill(
                                 LinearGradient(
                                     colors: [topColor, bottomColor],
@@ -277,24 +276,108 @@ struct PrimaryActionButtonStyle: ButtonStyle {
                                 )
                             )
                             .brightness(isHovered ? 0.04 : 0)
-                            .shadow(color: topColor.opacity(0.28), radius: 8, x: 0, y: 3)
+                            .shadow(color: topColor.opacity(0.24), radius: 5, x: 0, y: 2)
                     } else {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        Capsule()
                             .fill(Theme.surfaceSubtle)
                     }
                 }
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                Capsule()
                     .strokeBorder(
                         isEnabled ? Color.white.opacity(0.22) : Theme.border,
                         lineWidth: 1
                     )
             )
-            .scaleEffect(configuration.isPressed && isEnabled ? 0.988 : 1.0)
+            .scaleEffect(configuration.isPressed && isEnabled ? 0.97 : 1.0)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-            .animation(.easeOut(duration: 0.15), value: isHovered)
+            .animation(.easeOut(duration: 0.14), value: isHovered)
             .onHover { isHovered = $0 }
+    }
+}
+
+struct CompactModeSegmentPicker: View {
+    @Binding var withTip: Bool
+    let tipAvailable: Bool
+    let disabled: Bool
+
+    private var tipSelected: Bool {
+        withTip && tipAvailable
+    }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            segmentButton(
+                title: "静默保留",
+                icon: "eye.slash.fill",
+                selected: !tipSelected,
+                itemDisabled: disabled
+            ) {
+                withTip = false
+            }
+
+            segmentButton(
+                title: "撤回提示",
+                icon: "eye.fill",
+                selected: tipSelected,
+                itemDisabled: disabled || !tipAvailable
+            ) {
+                if tipAvailable {
+                    withTip = true
+                }
+            }
+            .help(tipAvailable ? "保留消息并显示撤回提示" : "当前微信构建号仅提供静默防撤回补丁")
+        }
+        .padding(2.5)
+        .background(
+            Capsule()
+                .fill(Theme.pillTrack)
+        )
+        .overlay(
+            Capsule()
+                .strokeBorder(Theme.border, lineWidth: 0.8)
+        )
+    }
+
+    private func segmentButton(
+        title: String,
+        icon: String,
+        selected: Bool,
+        itemDisabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(selected ? Theme.accent : .secondary)
+                Text(title)
+                    .font(.system(size: 11.5, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(selected ? .primary : .secondary)
+                    .lineLimit(1)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(
+                Group {
+                    if selected {
+                        Capsule()
+                            .fill(Theme.pillThumb)
+                            .shadow(color: Color.black.opacity(0.08), radius: 2, x: 0, y: 1)
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(Theme.border, lineWidth: 0.8)
+                            )
+                    }
+                }
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(itemDisabled)
+        .opacity(itemDisabled ? 0.45 : 1.0)
     }
 }
 

@@ -49,6 +49,45 @@ struct InstallReport: Decodable {
     }
 }
 
+struct CLICloneItem: Decodable, Equatable {
+    let index: Int
+    let path: String
+    let displayName: String
+    let bundleIdentifier: String
+    let sourceBundleIdentifier: String?
+    let marketingVersion: String
+    let installedBuild: String
+    let patchState: String
+}
+
+struct CloneListReport: Decodable, Equatable {
+    let schemaVersion: Int
+    let command: String
+    let outputDir: String
+    let nextAvailableIndex: Int
+    let clones: [CLICloneItem]
+}
+
+struct CloneCreateReport: Decodable {
+    let schemaVersion: Int
+    let command: String
+    let dryRun: Bool
+    let replaced: Bool
+    let resigned: Bool
+    let patchMode: String
+    let sourceApp: CLIAppInfo
+    let clone: CLICloneItem
+}
+
+struct CloneRemoveReport: Decodable {
+    let schemaVersion: Int
+    let command: String
+    let dryRun: Bool
+    let removedPath: String
+    let index: Int?
+    let bundleIdentifier: String
+}
+
 // The CLI prints this envelope to stdout (exit 1) when `--json` is set and an error occurs.
 struct CLIErrorEnvelope: Decodable, Error, LocalizedError {
     let schemaVersion: Int

@@ -1,9 +1,11 @@
+import AppKit
 import Foundation
 import SwiftUI
 
 @MainActor
 final class AppState: ObservableObject {
     static let defaultAppPath = "/Applications/WeChat.app"
+    static let applicationsDir = "/Applications"
     private static let selectedAppPathKey = "selectedWeChatAppPath"
     private static let withTipKey = "withTipEnabled"
 
@@ -16,6 +18,7 @@ final class AppState: ObservableObject {
     @Published var supportStatus: SupportStatus = .unknown
     @Published var installState: InstallState = .unknown
     @Published var wechatRunning: Bool = false
+    @Published var clones: [CloneInstanceInfo] = []
 
     @Published var busy: Bool = false
     @Published var busyMessage: String = ""
@@ -52,7 +55,17 @@ final class AppState: ObservableObject {
             while !Task.isCancelled {
                 guard let self else { return }
                 wechatRunning = WeChatStatusProbe.isRunning(appPath: appPath)
+                updateCloneRunningStates()
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
+    }
+
+    private func updateCloneRunningStates() {
+        for idx in clones.indices {
+            let running = WeChatStatusProbe.isRunning(appPath: clones[idx].path)
+            if clones[idx].isRunning != running {
+                clones[idx].isRunning = running
             }
         }
     }
@@ -76,6 +89,17 @@ final class AppState: ObservableObject {
     /// True when this build ships the revoke-tip (native recall notice) patch.
     var tipAvailable: Bool {
         versions?.installedBuildTargets.contains("revoke-tip") ?? false
+    }
+
+    /// Next free clone slot starting at 2, accounting for existing clones and bundle names on disk.
+    var nextCloneIndex: Int {
+        let used = Set(clones.map(\.index))
+        var candidate = 2
+        while used.contains(candidate)
+            || FileManager.default.fileExists(atPath: "\(Self.applicationsDir)/WeChat \(candidate).app") {
+            candidate += 1
+        }
+        return candidate
     }
 
     func setWithTip(_ enabled: Bool) async {
@@ -124,8 +148,8 @@ final class AppState: ObservableObject {
         guard WeChatStatusProbe.officialBundleIDs.contains(info.bundleIdentifier) else {
             banner = Banner(
                 kind: .error,
-                title: "不是官方微信",
-                message: "本精简版只支持官方 macOS 微信（com.tencent.xinWeChat / com.tencent.xin）。")
+                title: "不是官方主微信",
+                message: "首页用于管理官方主微信（com.tencent.xinWeChat / com.tencent.xin）；如需创建或管理多开分身，请前往「微信多开」页。")
             return
         }
 
@@ -140,6 +164,7 @@ final class AppState: ObservableObject {
             supportStatus = report.supported ? .supported : .unsupported(build: report.app.installedBuild)
             installState = state
             wechatRunning = WeChatStatusProbe.isRunning(appPath: candidate)
+            await refreshClones()
         } catch {
             banner = Banner(kind: .error, title: "无法使用所选微信", message: error.localizedDescription)
         }
@@ -171,6 +196,7 @@ final class AppState: ObservableObject {
 
         guard WeChatStatusProbe.appExists(at: targetPath) else {
             supportStatus = .noWeChat
+            await refreshClones()
             return
         }
 
@@ -180,6 +206,7 @@ final class AppState: ObservableObject {
                 kind: .error,
                 title: "无法读取所选 App",
                 message: "所选路径存在，但不是完整、可读取的 macOS App。请在首页重新选择官方微信。")
+            await refreshClones()
             return
         }
 
@@ -188,8 +215,9 @@ final class AppState: ObservableObject {
             supportStatus = .failed
             banner = Banner(
                 kind: .error,
-                title: "所选 App 不是官方微信",
-                message: "请在首页重新选择官方 macOS 微信。")
+                title: "所选 App 不是官方主微信",
+                message: "首页用于管理官方主微信；如需管理多开分身，请前往「微信多开」页，或在首页重新选择官方微信。")
+            await refreshClones()
             return
         }
 
@@ -207,6 +235,7 @@ final class AppState: ObservableObject {
             directInfo = nil
             supportStatus = report.supported ? .supported : .unsupported(build: report.app.installedBuild)
             installState = state
+            await refreshClones()
         } catch {
             guard statusRequestIsCurrent(revision, appPath: targetPath) else { return }
             versions = nil
@@ -222,6 +251,7 @@ final class AppState: ObservableObject {
                     title: "检测失败",
                     message: "\(error.localizedDescription) 请确认 App 文件完整；若问题持续，请查看下方日志。")
             }
+            await refreshClones()
         }
     }
 
@@ -372,12 +402,13 @@ final class AppState: ObservableObject {
     func install(_ request: InstallRequest) async {
         guard !busy else { return }
         banner = nil
-        appendLog("——— 开始：静默防撤回 ———")
+        let modeTitle = request.withTip ? "防撤回（显示提示）" : "静默防撤回"
+        appendLog("——— 开始：\(modeTitle) ———")
         guard silentAvailable else {
             banner = Banner(
                 kind: .warning,
                 title: "当前版本不可用",
-                message: "补丁数据没有提供该构建号的静默防撤回补丁。")
+                message: "补丁数据没有提供该构建号的\(modeTitle)补丁。")
             return
         }
         if WeChatStatusProbe.isRunning(appPath: appPath) {
@@ -414,7 +445,7 @@ final class AppState: ObservableObject {
             banner = Banner(kind: .error, title: "检查结果无效", message: "安装检查没有返回有效步骤，或包含无法安全继续的状态。请先查看日志并还原备份。")
             return
         case .alreadyInstalled:
-            banner = Banner(kind: .info, title: "已经开启", message: "静默防撤回已经在生效中，无需重复安装。")
+            banner = Banner(kind: .info, title: "已经开启", message: "\(modeTitle)已经在生效中，无需重复安装。")
             installState = .installed
             return
         case .installable:
@@ -449,7 +480,7 @@ final class AppState: ObservableObject {
             banner = Banner(kind: .info, title: "已取消", message: "你取消了管理员授权，未做任何修改。")
         } else if real.succeeded {
             banner = Banner(kind: .success,
-                            title: withTip ? "防撤回已开启（显示提示）" : "静默防撤回已开启",
+                            title: request.withTip ? "防撤回已开启（显示提示）" : "静默防撤回已开启",
                             message: "请完全退出并重新打开微信。首次使用建议用另一账号发消息再撤回，验证效果。")
             await refresh(preserveBanner: true)
         } else {
@@ -463,8 +494,9 @@ final class AppState: ObservableObject {
     func checkOnly(_ request: InstallRequest) async {
         guard !busy else { return }
         banner = nil
+        let modeTitle = request.withTip ? "防撤回（显示提示）" : "静默防撤回"
         guard silentAvailable else {
-            banner = Banner(kind: .warning, title: "当前版本不可用", message: "该构建号没有静默防撤回补丁。")
+            banner = Banner(kind: .warning, title: "当前版本不可用", message: "该构建号没有\(modeTitle)补丁。")
             return
         }
         busy = true
@@ -487,12 +519,312 @@ final class AppState: ObservableObject {
             case .invalid:
                 banner = Banner(kind: .error, title: "检查结果无效", message: "安装检查返回了无法安全继续的状态。请查看日志并先还原备份。")
             case .alreadyInstalled:
-                banner = Banner(kind: .info, title: "已经安装", message: "静默防撤回补丁已经在生效中。")
+                banner = Banner(kind: .info, title: "已经安装", message: "\(modeTitle)补丁已经在生效中。")
             case .installable:
                 banner = Banner(kind: .success, title: "检查通过", message: "补丁字节匹配，可以安全安装。")
             }
         } catch {
             banner = Banner(kind: .error, title: "检查结果不可用", message: error.localizedDescription)
+        }
+    }
+
+    // MARK: - Multi-instance Clones
+
+    static func canWriteDirectory(_ path: String) -> Bool {
+        let fm = FileManager.default
+        let dirURL = URL(fileURLWithPath: path, isDirectory: true)
+        let probeURL = dirURL.appendingPathComponent(".wechat-antirecall-dir-probe-\(UUID().uuidString)")
+        if (try? Data().write(to: probeURL, options: .withoutOverwriting)) != nil {
+            try? fm.removeItem(at: probeURL)
+            return true
+        }
+        return false
+    }
+
+    func refreshClones() async {
+        let cliURL = BundledPaths.cli
+        guard FileManager.default.isExecutableFile(atPath: cliURL.path) else { return }
+        let configURL = BundledPaths.effectivePatchesJSON
+        var args = ["clone", "list", "--output-dir", Self.applicationsDir, "--json"]
+        if BundledPaths.isValidCatalog(configURL) {
+            args += ["--config", configURL.path]
+        }
+
+        let result = await CLIRunner.runUser(cliURL, args)
+        guard result.exitCode == 0 else {
+            if let envelope = try? JSONDecoder().decode(CLIErrorEnvelope.self, from: Data(result.output.utf8)),
+               quarantineStaleBuiltCLI(envelope.schemaVersion) {
+                await refreshClones()
+                return
+            }
+            appendLog("刷新分身列表失败：\(decodeErrorMessage(from: result) ?? result.stderr)")
+            return
+        }
+
+        guard let report = try? JSONDecoder().decode(CloneListReport.self, from: Data(result.output.utf8)),
+              report.command == "clone.list" else {
+            appendLog("刷新分身列表失败：无法解析返回结果。")
+            return
+        }
+        if quarantineStaleBuiltCLI(report.schemaVersion) {
+            await refreshClones()
+            return
+        }
+        guard report.schemaVersion == GUICLIProtocol.schemaVersion else {
+            appendLog("刷新分身列表失败：命令行接口版本不兼容（\(report.schemaVersion)）。")
+            return
+        }
+
+        clones = report.clones.map { item in
+            CloneInstanceInfo(
+                index: item.index,
+                path: item.path,
+                displayName: item.displayName,
+                bundleIdentifier: item.bundleIdentifier,
+                marketingVersion: item.marketingVersion,
+                installedBuild: item.installedBuild,
+                patchState: ClonePatchState(rawState: item.patchState),
+                isRunning: WeChatStatusProbe.isRunning(appPath: item.path)
+            )
+        }
+    }
+
+    func createClone(patchMode: String) async {
+        guard !busy else { return }
+        banner = nil
+        let slotIndex = nextCloneIndex
+        appendLog("——— 开始：创建微信分身（微信 \(slotIndex)，补丁模式：\(patchMode)） ———")
+
+        busy = true
+        defer { busy = false; busyMessage = "" }
+
+        let cliURL = BundledPaths.cli
+        let configURL = BundledPaths.effectivePatchesJSON
+        var baseArgs = [
+            "clone", "create",
+            "--app", appPath,
+            "--output-dir", Self.applicationsDir,
+            "--index", "\(slotIndex)",
+            "--patch-mode", patchMode
+        ]
+        if BundledPaths.isValidCatalog(configURL) {
+            baseArgs += ["--config", configURL.path]
+        }
+
+        busyMessage = "正在预检分身创建环境…"
+        let dryArgs = baseArgs + ["--dry-run", "--json"]
+        let dry = await CLIRunner.runUser(cliURL, dryArgs, onLine: { [weak self] line in
+            Task { @MainActor in self?.appendLog(line) }
+        })
+        if dry.exitCode != 0 {
+            let message = decodeErrorMessage(from: dry) ?? dry.stderr
+            banner = Banner(kind: .error, title: "分身预检未通过", message: message.isEmpty ? "无法创建微信分身。" : message)
+            appendLog("分身预检失败：\(message)")
+            return
+        }
+        guard let dryReport = try? JSONDecoder().decode(CloneCreateReport.self, from: Data(dry.output.utf8)),
+              dryReport.command == "clone.create",
+              dryReport.schemaVersion == GUICLIProtocol.schemaVersion else {
+            banner = Banner(kind: .error, title: "预检结果不可用", message: "命令行工具返回了无法识别的分身预检数据。")
+            return
+        }
+
+        let real: CLIResult
+        if Self.canWriteDirectory(Self.applicationsDir) {
+            busyMessage = "正在生成微信 \(slotIndex) 并重签名…"
+            appendLog("目录检查：\(Self.applicationsDir) 可直接写入，无需管理员密码。")
+            real = await CLIRunner.runUser(cliURL, baseArgs, onLine: { [weak self] line in
+                Task { @MainActor in self?.appendLog(line) }
+            })
+        } else {
+            busyMessage = "正在生成微信 \(slotIndex)（需要管理员密码）…"
+            real = await CLIRunner.runAdmin(cliURL, baseArgs, operation: "clone-create", onLine: { [weak self] line in
+                Task { @MainActor in self?.appendLog(line) }
+            })
+        }
+
+        if real.cancelled {
+            banner = Banner(kind: .info, title: "已取消", message: "你取消了管理员授权，未创建微信分身。")
+        } else if real.succeeded {
+            await refreshClones()
+            let modeSummary = Self.patchModeSummary(patchMode)
+            banner = Banner(
+                kind: .success,
+                title: "已创建「微信 \(slotIndex)」",
+                message: "分身已安装至 \(dryReport.clone.path)（\(modeSummary)）。点击下方「启动」即可登录其他微信号。"
+            )
+        } else {
+            banner = Banner(kind: .error, title: "创建分身失败", message: friendlyFailure(real))
+            appendLog("创建分身失败（退出码 \(real.exitCode)）")
+        }
+    }
+
+    func rebuildClone(_ clone: CloneInstanceInfo, patchMode: String) async {
+        guard !busy else { return }
+        banner = nil
+        if WeChatStatusProbe.isRunning(appPath: clone.path) {
+            updateCloneRunningStates()
+            banner = Banner(
+                kind: .warning,
+                title: "请先退出「\(clone.displayName)」",
+                message: "同步重建会替换该分身应用包，请先退出正在运行的「\(clone.displayName)」（主微信无需退出）。"
+            )
+            return
+        }
+
+        appendLog("——— 开始：同步重建分身（\(clone.displayName)，补丁模式：\(patchMode)） ———")
+        busy = true
+        defer { busy = false; busyMessage = "" }
+
+        let cliURL = BundledPaths.cli
+        let configURL = BundledPaths.effectivePatchesJSON
+        var baseArgs = [
+            "clone", "create",
+            "--app", appPath,
+            "--output-dir", Self.applicationsDir,
+            "--index", "\(clone.index)",
+            "--patch-mode", patchMode,
+            "--replace"
+        ]
+        if BundledPaths.isValidCatalog(configURL) {
+            baseArgs += ["--config", configURL.path]
+        }
+
+        busyMessage = "正在检查同步条件…"
+        let dry = await CLIRunner.runUser(cliURL, baseArgs + ["--dry-run", "--json"], onLine: { [weak self] line in
+            Task { @MainActor in self?.appendLog(line) }
+        })
+        if dry.exitCode != 0 {
+            let message = decodeErrorMessage(from: dry) ?? dry.stderr
+            banner = Banner(kind: .error, title: "同步预检未通过", message: message.isEmpty ? "无法同步重建该分身。" : message)
+            appendLog("同步预检失败：\(message)")
+            return
+        }
+
+        let parentDir = URL(fileURLWithPath: clone.path).deletingLastPathComponent().path
+        let real: CLIResult
+        if Self.canWriteDirectory(parentDir) {
+            busyMessage = "正在同步重建 \(clone.displayName)…"
+            real = await CLIRunner.runUser(cliURL, baseArgs, onLine: { [weak self] line in
+                Task { @MainActor in self?.appendLog(line) }
+            })
+        } else {
+            busyMessage = "正在同步重建 \(clone.displayName)（需要管理员密码）…"
+            real = await CLIRunner.runAdmin(cliURL, baseArgs, operation: "clone-rebuild", onLine: { [weak self] line in
+                Task { @MainActor in self?.appendLog(line) }
+            })
+        }
+
+        if real.cancelled {
+            banner = Banner(kind: .info, title: "已取消", message: "你取消了管理员授权，未修改「\(clone.displayName)」。")
+        } else if real.succeeded {
+            await refreshClones()
+            let modeSummary = Self.patchModeSummary(patchMode)
+            banner = Banner(
+                kind: .success,
+                title: "已同步更新「\(clone.displayName)」",
+                message: "分身已更新至当前主微信版本（\(modeSummary)），本地聊天记录完好保留。"
+            )
+        } else {
+            banner = Banner(kind: .error, title: "同步重建失败", message: friendlyFailure(real))
+            appendLog("同步重建失败（退出码 \(real.exitCode)）")
+        }
+    }
+
+    func removeClone(_ clone: CloneInstanceInfo) async {
+        guard !busy else { return }
+        banner = nil
+        if WeChatStatusProbe.isRunning(appPath: clone.path) {
+            updateCloneRunningStates()
+            banner = Banner(
+                kind: .warning,
+                title: "请先退出「\(clone.displayName)」",
+                message: "删除前请先退出正在运行的「\(clone.displayName)」。"
+            )
+            return
+        }
+
+        appendLog("——— 开始：删除分身（\(clone.displayName)） ———")
+        busy = true
+        defer { busy = false; busyMessage = "" }
+
+        let cliURL = BundledPaths.cli
+        let baseArgs = ["clone", "remove", "--target", clone.path]
+
+        busyMessage = "正在校验分身信息…"
+        let dry = await CLIRunner.runUser(cliURL, baseArgs + ["--dry-run", "--json"], onLine: { [weak self] line in
+            Task { @MainActor in self?.appendLog(line) }
+        })
+        if dry.exitCode != 0 {
+            let message = decodeErrorMessage(from: dry) ?? dry.stderr
+            banner = Banner(kind: .error, title: "无法删除该分身", message: message.isEmpty ? "分身校验未通过。" : message)
+            return
+        }
+
+        let parentDir = URL(fileURLWithPath: clone.path).deletingLastPathComponent().path
+        let real: CLIResult
+        if Self.canWriteDirectory(parentDir) {
+            busyMessage = "正在删除 \(clone.displayName)…"
+            real = await CLIRunner.runUser(cliURL, baseArgs, onLine: { [weak self] line in
+                Task { @MainActor in self?.appendLog(line) }
+            })
+        } else {
+            busyMessage = "正在删除 \(clone.displayName)（需要管理员密码）…"
+            real = await CLIRunner.runAdmin(cliURL, baseArgs, operation: "clone-remove", onLine: { [weak self] line in
+                Task { @MainActor in self?.appendLog(line) }
+            })
+        }
+
+        if real.cancelled {
+            banner = Banner(kind: .info, title: "已取消", message: "你取消了管理员授权，未删除「\(clone.displayName)」。")
+        } else if real.succeeded {
+            await refreshClones()
+            banner = Banner(
+                kind: .success,
+                title: "已删除「\(clone.displayName)」",
+                message: "已移除 \(clone.path)，本地微信聊天数据未被删除。"
+            )
+        } else {
+            banner = Banner(kind: .error, title: "删除分身失败", message: friendlyFailure(real))
+            appendLog("删除分身失败（退出码 \(real.exitCode)）")
+        }
+    }
+
+    func launchClone(_ clone: CloneInstanceInfo) async {
+        let appURL = URL(fileURLWithPath: clone.path)
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        do {
+            _ = try await NSWorkspace.shared.openApplication(at: appURL, configuration: config)
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            updateCloneRunningStates()
+        } catch {
+            banner = Banner(
+                kind: .error,
+                title: "无法启动「\(clone.displayName)」",
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    func quitClone(_ clone: CloneInstanceInfo) async {
+        guard !busy else { return }
+        busy = true
+        busyMessage = "正在退出 \(clone.displayName)…"
+        await WeChatStatusProbe.quit(appPath: clone.path)
+        updateCloneRunningStates()
+        busy = false
+        busyMessage = ""
+    }
+
+    private static func patchModeSummary(_ patchMode: String) -> String {
+        switch patchMode {
+        case "silent":
+            return "已写入静默防撤回补丁"
+        case "with-tip", "withTip":
+            return "已写入撤回提示模式补丁"
+        default:
+            return "纯净未打补丁"
         }
     }
 

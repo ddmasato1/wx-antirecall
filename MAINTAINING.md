@@ -19,13 +19,14 @@
 
 ## 目录与职责
 
-- `Sources/WeChatAntiRecall/CLI.swift`：`versions` / `install` / `restore` 三个命令，Mach-O 补丁引擎、备份、重签名、权限检查。
-- `Sources/WeChatAntiRecall/JSONOutput.swift`：CLI 的 `--json` DTO；`jsonSchemaVersion = 2`。
-- `Sources/WeChatAntiRecallGUI/`：SwiftUI 外壳，只通过子进程调用 CLI，不直接链接 CLI target。
+- `Sources/WeChatAntiRecall/CLI.swift`：`versions` / `install` / `restore` 命令与 `clone` 路由入口，Mach-O 补丁引擎、备份、重签名、权限检查。
+- `Sources/WeChatAntiRecall/Clone.swift`：`clone <list|create|remove>` 多开分身扫描、创建/无残留原子替换、本地化名称改写、补丁状态检测与安全删除。
+- `Sources/WeChatAntiRecall/JSONOutput.swift`：CLI 的 `--json` DTO；`jsonSchemaVersion = 3`。
+- `Sources/WeChatAntiRecallGUI/`：SwiftUI 外壳（含首页、微信多开、支持版本、权限帮助），只通过子进程调用 CLI，不直接链接 CLI target。
 - `Scripts/make-app.sh`：组装并签名 `dist/AntiRecall.app`。
-- `Tests/WeChatAntiRecallTests/`：补丁配置不变量、安装状态判定、签名链路、进程路径判定。
+- `Tests/WeChatAntiRecallTests/`：补丁配置不变量、安装状态判定、签名链路、进程路径判定及多开分身（`CloneTests.swift`）全链路测试。
 
-CLI 与 GUI 的 JSON schema 分别在 `JSONOutput.swift` 与 `Model/UITypes.swift`，改动字段时必须同步。
+CLI 与 GUI 的 JSON schema 分别在 `JSONOutput.swift` 与 `Model/UITypes.swift`（当前 `schemaVersion = 3`），改动字段时必须同步。
 
 ## 安装链路
 
@@ -48,6 +49,14 @@ CLI 与 GUI 的 JSON schema 分别在 `JSONOutput.swift` 与 `Model/UITypes.swif
 微信照常生成原生撤回提示，但按 newMsgId 定位不到原消息，所以消息保留。`--with-tip` 只选 `revoke-tip` target，与 `revoke` 互斥（270390 两者都动 `0x461413c`，绝不能同时安装；270601 地址独立，互斥是模式语义层面的约定）。切换模式会新建一份备份。**GUI 已删除恢复界面**：需要还原时用 CLI `restore`（选最早时间戳的备份即原始字节），或直接重装官网版微信。混合态（`alreadyPatched` + `wouldPatch`）在 `InstallState.classify` 里判为「未开启」，属于正常的模式切换中间态。
 
 270416 的 `revoke-tip` 地址未定位（缺二进制样本），因此只提供静默模式；GUI 按 `installedBuildTargets` 禁用提示模式卡片。
+
+## 微信多开分身机制（clone）
+
+- **独立 Bundle 身份**：复制官方 `WeChat.app` 为 `/Applications/WeChat <N>.app`（槽位默认从 `2` 开始递增），将 `CFBundleIdentifier` 改为 `com.tencent.xinWeChat.antirecall.clone<N>`，写入 `WeChatAntiRecallClone = true`、`WeChatAntiRecallCloneIndex` 与 `WeChatAntiRecallCloneSourceBundleIdentifier`，默认剥离 `CFBundleURLTypes`，并关闭 Sparkle 自动更新（写入 `SUEnableAutomaticChecks = false` / `SUAutomaticallyUpdate = false` 并移除 `SUEnableInstallerLauncherService` 等键值）以避免 XPC 查找告警或自更新覆盖分身。
+- **中英文显示名同步**：除 `Contents/Info.plist` 外，同步改写 `Contents/Resources/*.lproj/InfoPlist.strings`（`zh*` 写为 `微信 <N>`，其余写为 `WeChat <N>`），解决 macOS 中文环境下 Dock/菜单栏仍显示「微信」的问题。
+- **签名策略**：分身统一调用 `resign(..., preserveEntitlements: false)` 剥离绑定原厂 Team ID 的沙盒 entitlements 并以无 Hardened Runtime 的 ad-hoc 签名封包，避免 Bundle ID 变更后触发容器/Team ID 冲突。
+- **模式切换与无残留更新**：创建分身支持 `--patch-mode none|silent|with-tip`；即使源微信本身已打过另一模式的补丁（如 `270601` 独立地址的 `revoke` / `revoke-tip`），构造分身时也会自动将未选中 target 的独立补丁地址还原为 `expected[0]` 原始字节，并清理继承来的 `.wechat-antirecall-backup-*` 文件。`--replace` 采用同目录隐藏暂存包切换并在成功后立即清理旧包，不在 `/Applications` 留下备份僵尸图标。
+- **安全边界**：`--replace` 覆盖与 `clone remove` 均强制校验 `WeChatCloneMetadata.isAcceptedClone`，严禁覆盖或删除官方主微信及任何非本工具创建的应用。
 
 ## 270601（4.2.1）适配记录（2026-11-26）
 

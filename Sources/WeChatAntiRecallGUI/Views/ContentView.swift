@@ -3,6 +3,7 @@ import AppKit
 
 enum NavSection: String, CaseIterable, Identifiable {
     case home
+    case clone
     case versions
     case permissions
 
@@ -11,6 +12,7 @@ enum NavSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .home: return "首页"
+        case .clone: return "微信多开"
         case .versions: return "支持版本"
         case .permissions: return "权限帮助"
         }
@@ -19,6 +21,7 @@ enum NavSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .home: return "shield.lefthalf.filled"
+        case .clone: return "square.on.square"
         case .versions: return "checkmark.seal"
         case .permissions: return "lock.shield"
         }
@@ -68,6 +71,8 @@ struct ContentView: View {
                         switch selectedSection {
                         case .home:
                             HomeView(onOpenVersions: { select(.versions) })
+                        case .clone:
+                            CloneView(onOpenHome: { select(.home) })
                         case .versions:
                             SupportedVersionsView()
                         case .permissions:
@@ -92,23 +97,31 @@ struct ContentView: View {
     // MARK: - Unified Top Titlebar & Segmented Pill Navigation
 
     private var topNavigationBar: some View {
-        ZStack {
-            // Centered segmented pill tabs
-            HStack(spacing: 3) {
+        HStack(spacing: 0) {
+            // Reserve leading clearance for macOS window traffic lights
+            Color.clear
+                .frame(width: 76, height: 1)
+
+            Spacer(minLength: 8)
+
+            // Segmented pill tabs
+            HStack(spacing: 2) {
                 ForEach(NavSection.allCases) { section in
                     let isSelected = (selectedSection == section)
                     Button {
                         select(section)
                     } label: {
-                        HStack(spacing: 5) {
+                        HStack(spacing: 4.5) {
                             Image(systemName: section.icon)
-                                .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
+                                .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
                                 .foregroundStyle(isSelected ? Theme.accent : .secondary)
                             Text(section.title)
-                                .font(.system(size: 12.5, weight: isSelected ? .semibold : .medium))
+                                .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
                                 .foregroundStyle(isSelected ? .primary : .secondary)
+                                .lineLimit(1)
                         }
-                        .padding(.horizontal, 12)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 10)
                         .padding(.vertical, 5.5)
                         .background(
                             ZStack {
@@ -139,12 +152,11 @@ struct ContentView: View {
                     .strokeBorder(Theme.border, lineWidth: 0.8)
             )
 
-            // Trailing live WeChat process status badge (leading side stays clear for macOS traffic lights)
-            HStack {
-                Spacer()
-                WeChatRunningPill()
-            }
-            .padding(.trailing, 16)
+            Spacer(minLength: 8)
+
+            WeChatRunningPill()
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.trailing, 16)
         }
         .padding(.top, 7)
         .padding(.bottom, 9)

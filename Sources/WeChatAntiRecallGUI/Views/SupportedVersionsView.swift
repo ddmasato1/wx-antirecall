@@ -18,48 +18,43 @@ struct SupportedVersionsView: View {
     @State private var loadFailed = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.gap) {
-            Card(padding: 16) {
-                HStack(alignment: .center, spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .fill(Theme.accentSoft)
-                            .frame(width: 40, height: 40)
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(Theme.accent)
-                    }
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 8) {
+        Card {
+            VStack(alignment: .leading, spacing: 11) {
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 7) {
                             Text("内置离线支持列表")
-                                .font(.system(size: 16, weight: .bold))
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.primary)
+
                             if !rows.isEmpty {
-                                StatusPill(tone: .neutral, text: "共 \(rows.count) 个构建版本")
+                                StatusPill(tone: .neutral, text: "\(rows.count) 个构建")
                             }
                         }
-                        Text("仅对经过精确校验的微信构建号打补丁，全程离线运行，不联网拉取外部补丁数据。")
+
+                        Text("仅对精确校验的官网 DMG 版构建号打补丁，全程离线运行")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
-                }
-            }
 
-            if loadFailed {
-                Card {
-                    HStack(spacing: 10) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(Theme.amber)
-                        Text("无法读取内置补丁数据（patches.json）。")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
+                    Spacer(minLength: 0)
                 }
-            } else {
-                VStack(spacing: 10) {
-                    ForEach(rows) { row in
-                        rowCard(row)
+
+                Rectangle()
+                    .fill(Theme.subtleDivider)
+                    .frame(height: 1)
+
+                if loadFailed {
+                    HintRow(
+                        systemImage: "exclamationmark.triangle.fill",
+                        text: "无法读取内置补丁数据（patches.json）。",
+                        tint: Theme.amber
+                    )
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(rows) { row in
+                            versionRow(row)
+                        }
                     }
                 }
             }
@@ -90,51 +85,46 @@ struct SupportedVersionsView: View {
         }
     }
 
-    private func rowCard(_ row: SupportedVersionRow) -> some View {
+    private func versionRow(_ row: SupportedVersionRow) -> some View {
         let installed = isInstalledBuild(row)
-        return Card(padding: 15) {
-            HStack(alignment: .center, spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(installed ? Theme.accentSoft : Theme.surfaceSubtle)
-                        .frame(width: 38, height: 38)
-                    Image(systemName: "bubble.left.and.bubble.right.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(installed ? Theme.accent : .secondary)
+        return HStack(alignment: .center, spacing: 8) {
+            HStack(spacing: 7) {
+                Text("微信 \(row.wechatVersion)")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
+
+                MonoChip(text: row.build, prefix: "Build")
+            }
+
+            Spacer(minLength: 8)
+
+            HStack(spacing: 6) {
+                if row.silent {
+                    capabilityTag(icon: "eye.slash.fill", text: "静默保留")
                 }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
-                        Text("微信 \(row.wechatVersion)")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.primary)
-                        MonoChip(text: row.build, prefix: "Build")
-                    }
-
-                    HStack(spacing: 6) {
-                        if row.silent {
-                            capabilityTag(icon: "eye.slash.fill", text: "静默保留")
-                        }
-                        if row.tip {
-                            capabilityTag(icon: "eye.fill", text: "撤回提示")
-                        } else {
-                            Text("仅支持静默模式")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
+                if row.tip {
+                    capabilityTag(icon: "eye.fill", text: "撤回提示")
+                } else {
+                    Text("仅静默")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 4)
                 }
-
-                Spacer(minLength: 8)
 
                 if installed {
-                    StatusPill(tone: .good, text: "本机当前版本", systemImage: "checkmark.circle.fill")
+                    StatusPill(tone: .good, text: "当前版本", systemImage: "checkmark.circle.fill")
                 }
             }
         }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(Theme.surfaceSubtle)
+        )
         .overlay(
-            RoundedRectangle(cornerRadius: Theme.corner, style: .continuous)
-                .strokeBorder(installed ? Theme.accentBorder : .clear, lineWidth: 1.5)
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .strokeBorder(installed ? Theme.accentBorder : Theme.border, lineWidth: installed ? 1.2 : 1)
         )
     }
 

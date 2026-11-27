@@ -11,7 +11,7 @@ final class InstallReportStateTests: XCTestCase {
         }.joined(separator: ",")
         let json = """
         {
-          "schemaVersion": 2,
+          "schemaVersion": 3,
           "command": "install",
           "dryRun": true,
           "resigned": false,
