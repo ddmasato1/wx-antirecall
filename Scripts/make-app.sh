@@ -1,7 +1,7 @@
 #!/bin/bash
 # Assembles AntiRecall.app from SwiftPM build products. Uses only system tools.
 #
-#   ARCHS="arm64"          (default) — matches reality: the silent patches are arm64-only.
+#   ARCHS="arm64"          (default) — matches reality: the patches are arm64-only.
 #   ARCHS="arm64 x86_64"   universal — cosmetic.
 #   CODESIGN_ID="-"        (default) — ad-hoc. Set to a Developer ID to sign properly.
 #
@@ -12,12 +12,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 APP_NAME="AntiRecall"
-GUI="WeChatAntiRecallGUI"
-CLI="wechat-antirecall"
-BUNDLE_ID="com.github.fzlzjerry.wechatantirecall"
+GUI="AntiRecallGUI"
+CLI="wx-antirecall"
+BUNDLE_ID="com.github.ddmasato1.wx-antirecall"
 SIGN_ID="${CODESIGN_ID:--}"
 ARCHS="${ARCHS:-arm64}"
-SHORT_VERSION="${APP_VERSION:-1.0.0}"
+SHORT_VERSION="${APP_VERSION:-1.3.0}"
 BUILD_NUMBER="${APP_BUILD:-1}"
 
 echo ">> Building ($ARCHS, release)..."

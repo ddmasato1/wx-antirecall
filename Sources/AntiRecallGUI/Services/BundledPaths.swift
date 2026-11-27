@@ -1,8 +1,8 @@
 import Foundation
 
-// Resolves the two artifacts this GUI ships (CLI and the bundled single-build patches.json),
+// Resolves the two artifacts this GUI ships (CLI and the bundled patches.json),
 // plus the writable working directory used for admin-run logs. In a packaged .app these live
-// in Contents/Resources; during development (`swift run WeChatAntiRecallGUI`) they are resolved
+// in Contents/Resources; during development (`swift run AntiRecallGUI`) they are resolved
 // from the repo's `.build` and root so the app is testable before packaging.
 enum BundledPaths {
     static var resourcesURL: URL {
@@ -20,7 +20,7 @@ enum BundledPaths {
         var current = directoryURL.standardizedFileURL.resolvingSymlinksInPath()
         while true {
             let package = current.appendingPathComponent("Package.swift")
-            let sources = current.appendingPathComponent("Sources/WeChatAntiRecallGUI", isDirectory: true)
+            let sources = current.appendingPathComponent("Sources/AntiRecallGUI", isDirectory: true)
             var sourcesIsDirectory = ObjCBool(false)
             if fileManager.fileExists(atPath: package.path),
                fileManager.fileExists(atPath: sources.path, isDirectory: &sourcesIsDirectory),
@@ -53,13 +53,12 @@ enum BundledPaths {
     }
 
     static var cli: URL {
-        firstReadable(devBuildDirs.map { $0.appendingPathComponent("wechat-antirecall") }
-                      + [resourcesURL.appendingPathComponent("wechat-antirecall")])
-            ?? resourcesURL.appendingPathComponent("wechat-antirecall")
+        firstReadable(devBuildDirs.map { $0.appendingPathComponent("wx-antirecall") }
+                      + [resourcesURL.appendingPathComponent("wx-antirecall")])
+            ?? resourcesURL.appendingPathComponent("wx-antirecall")
     }
 
-    /// No OTA catalog in this fork: the bundled catalog is the only source of truth. This
-    /// prevents a downloaded multi-version catalog from re-enabling stripped features.
+    /// The bundled catalog is the single offline source of truth.
     static var effectivePatchesJSON: URL {
         let bundled = resourcesURL.appendingPathComponent("patches.json")
         if FileManager.default.isReadableFile(atPath: bundled.path) { return bundled }
@@ -69,7 +68,7 @@ enum BundledPaths {
     static var appSupportDir: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
-        return base.appendingPathComponent("WeChatAntiRecall", isDirectory: true)
+        return base.appendingPathComponent("AntiRecall", isDirectory: true)
     }
 
     static var logsDir: URL {

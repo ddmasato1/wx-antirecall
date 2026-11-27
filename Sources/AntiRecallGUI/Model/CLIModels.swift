@@ -1,6 +1,6 @@
 import Foundation
 
-// Decodable mirrors of the CLI's `--json` output (see Sources/WeChatAntiRecall/JSONOutput.swift).
+// Decodable mirrors of the CLI's `--json` output (see Sources/AntiRecallCLI/JSONOutput.swift).
 // The GUI is a separate target with no dependency on the CLI target, so it re-declares the
 // shapes it consumes. `schemaVersion` lets us detect a CLI/GUI mismatch.
 

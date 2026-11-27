@@ -6,9 +6,12 @@ let defaultCloneOutputDir = "/Applications"
 
 enum WeChatCloneMetadata {
     static let bundleIdentifierPrefix = "com.tencent.xinWeChat.antirecall.clone"
-    static let markerKey = "WeChatAntiRecallClone"
-    static let cloneIndexKey = "WeChatAntiRecallCloneIndex"
-    static let sourceBundleIdentifierKey = "WeChatAntiRecallCloneSourceBundleIdentifier"
+    static let markerKey = "AntiRecallClone"
+    static let legacyMarkerKey = "WeChatAntiRecallClone"
+    static let cloneIndexKey = "AntiRecallCloneIndex"
+    static let legacyCloneIndexKey = "WeChatAntiRecallCloneIndex"
+    static let sourceBundleIdentifierKey = "AntiRecallCloneSourceBundleIdentifier"
+    static let legacySourceBundleIdentifierKey = "WeChatAntiRecallCloneSourceBundleIdentifier"
 
     static func bundleIdentifier(for index: Int) -> String {
         "\(bundleIdentifierPrefix)\(index)"
@@ -26,15 +29,20 @@ enum WeChatCloneMetadata {
     }
 
     static func isAcceptedClone(plist: [String: Any], bundleIdentifier: String) -> Bool {
-        bundleIdentifier.hasPrefix(bundleIdentifierPrefix) && (plist[markerKey] as? Bool == true)
+        guard bundleIdentifier.hasPrefix(bundleIdentifierPrefix) else {
+            return false
+        }
+        return (plist[markerKey] as? Bool == true) || (plist[legacyMarkerKey] as? Bool == true)
     }
 
     static func extractCloneIndex(plist: [String: Any], bundleIdentifier: String) -> Int? {
-        if let index = plist[cloneIndexKey] as? Int, index >= 1 {
-            return index
-        }
-        if let number = plist[cloneIndexKey] as? NSNumber, number.intValue >= 1 {
-            return number.intValue
+        for key in [cloneIndexKey, legacyCloneIndexKey] {
+            if let index = plist[key] as? Int, index >= 1 {
+                return index
+            }
+            if let number = plist[key] as? NSNumber, number.intValue >= 1 {
+                return number.intValue
+            }
         }
         guard bundleIdentifier.hasPrefix(bundleIdentifierPrefix) else {
             return nil
@@ -44,6 +52,10 @@ enum WeChatCloneMetadata {
             return nil
         }
         return parsed
+    }
+
+    static func extractSourceBundleIdentifier(plist: [String: Any]) -> String? {
+        (plist[sourceBundleIdentifierKey] as? String) ?? (plist[legacySourceBundleIdentifierKey] as? String)
     }
 }
 
@@ -89,7 +101,7 @@ enum ClonePatchState: String, Equatable {
 extension CLI {
     func clone(_ arguments: [String]) throws {
         guard let subcommand = arguments.first else {
-            throw ToolError.usage("clone 需要指定子命令：list、create 或 remove。运行 `wechat-antirecall help` 查看用法。")
+            throw ToolError.usage("clone 需要指定子命令：list、create 或 remove。运行 `wx-antirecall help` 查看用法。")
         }
         let rest = Array(arguments.dropFirst())
         switch subcommand {
@@ -349,7 +361,7 @@ enum WeChatCloneScanner {
 
         let shortVersion = (plist["CFBundleShortVersionString"] as? String) ?? "—"
         let buildVersion = (plist["CFBundleVersion"] as? String) ?? "—"
-        let sourceBundleID = plist[WeChatCloneMetadata.sourceBundleIdentifierKey] as? String
+        let sourceBundleID = WeChatCloneMetadata.extractSourceBundleIdentifier(plist: plist)
         let displayName = resolveChinesePreferredDisplayName(appURL: appURL, plist: plist, index: index)
         let patchState = detectPatchState(appURL: appURL, buildVersion: buildVersion, configs: configs)
 
@@ -580,7 +592,7 @@ enum WeChatCloneInstaller {
         try requireDirectoryWritable(outputDirURL, operation: "在目标目录创建微信分身")
 
         let temporaryURL = outputDirURL.appendingPathComponent(
-            ".WeChat \(targetIndex).wechat-antirecall-\(UUID().uuidString).app",
+            ".WeChat \(targetIndex).wx-antirecall-\(UUID().uuidString).app",
             isDirectory: true
         )
         defer {
@@ -891,7 +903,8 @@ enum WeChatCloneInstaller {
 
         var toDelete: [URL] = []
         for case let fileURL as URL in enumerator {
-            if fileURL.lastPathComponent.contains(".wechat-antirecall-backup-") {
+            let name = fileURL.lastPathComponent
+            if name.contains(".wx-antirecall-backup-") || name.contains(".wx-antirecall-backup-") {
                 toDelete.append(fileURL)
             }
         }

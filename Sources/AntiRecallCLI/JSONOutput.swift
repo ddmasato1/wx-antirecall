@@ -1,7 +1,7 @@
 import Foundation
 
-// Machine-readable output for the GUI. Only the silent recall patch remains in this
-// small-build-matrix (270390 / 270416 / 270601) fork, so the DTO surface is intentionally small.
+// Machine-readable output for the GUI. Covers the supported anti-recall build matrix
+// (270390 / 270416 / 270601) and multi-instance clone management.
 //
 // Every top-level report carries `schemaVersion` so a mismatched CLI/GUI pair is detectable.
 

@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import WeChatAntiRecall
+@testable import AntiRecallCLI
 
 final class CodeSigningTests: XCTestCase {
     func testResignPreservesRootAndNestedEntitlements() throws {
@@ -76,7 +76,7 @@ final class CodeSigningTests: XCTestCase {
 
     private func makeSignedAppFixture(includeSignedResource: Bool = false) throws -> SignedAppFixture {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("wechat-antirecall-codesign-tests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("wx-antirecall-codesign-tests-\(UUID().uuidString)", isDirectory: true)
         let appURL = root.appendingPathComponent("Fixture.app", isDirectory: true)
         let executableURL = appURL.appendingPathComponent("Contents/MacOS/Fixture")
         let helperAppURL = appURL.appendingPathComponent("Contents/Helpers/Helper.app", isDirectory: true)
@@ -114,7 +114,7 @@ final class CodeSigningTests: XCTestCase {
         try writeInfoPlist(
             [
                 "CFBundleExecutable": "Fixture",
-                "CFBundleIdentifier": "dev.wechat-antirecall.codesign-fixture",
+                "CFBundleIdentifier": "dev.wx-antirecall.codesign-fixture",
                 "CFBundlePackageType": "APPL",
                 "CFBundleVersion": "1"
             ],
@@ -123,7 +123,7 @@ final class CodeSigningTests: XCTestCase {
         try writeInfoPlist(
             [
                 "CFBundleExecutable": "Helper",
-                "CFBundleIdentifier": "dev.wechat-antirecall.codesign-fixture.helper",
+                "CFBundleIdentifier": "dev.wx-antirecall.codesign-fixture.helper",
                 "CFBundlePackageType": "APPL",
                 "CFBundleVersion": "1"
             ],
@@ -132,7 +132,7 @@ final class CodeSigningTests: XCTestCase {
         try writeInfoPlist(
             [
                 "CFBundleExecutable": "Empty",
-                "CFBundleIdentifier": "dev.wechat-antirecall.codesign-fixture.empty",
+                "CFBundleIdentifier": "dev.wx-antirecall.codesign-fixture.empty",
                 "CFBundlePackageType": "XPC!",
                 "CFBundleVersion": "1"
             ],

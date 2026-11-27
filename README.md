@@ -59,8 +59,8 @@ open dist/AntiRecall.app
 工具核心与 GUI 解耦，也可直接使用命令行：
 
 ```bash
-swift build -c release --product wechat-antirecall
-WXAR_CLI="$(swift build -c release --show-bin-path)/wechat-antirecall"
+swift build -c release --product wx-antirecall
+WXAR_CLI="$(swift build -c release --show-bin-path)/wx-antirecall"
 
 # 查看当前微信版本与支持状态
 "$WXAR_CLI" versions --app /Applications/WeChat.app --config ./patches.json
@@ -74,7 +74,7 @@ WXAR_CLI="$(swift build -c release --show-bin-path)/wechat-antirecall"
 # 从备份还原
 "$WXAR_CLI" restore --app /Applications/WeChat.app \
   --binary Contents/Resources/wechat.dylib \
-  --backup /Applications/WeChat.app/Contents/Resources/wechat.dylib.wechat-antirecall-backup-YYYYMMDD-HHMMSS
+  --backup /Applications/WeChat.app/Contents/Resources/wechat.dylib.wx-antirecall-backup-YYYYMMDD-HHMMSS
 
 # 查看已创建的微信多开分身及补丁状态
 "$WXAR_CLI" clone list --output-dir /Applications --config ./patches.json

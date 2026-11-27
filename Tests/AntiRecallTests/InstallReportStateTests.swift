@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import WeChatAntiRecallGUI
+@testable import AntiRecallGUI
 
 final class InstallReportStateTests: XCTestCase {
     private func report(targetStates: [String]) throws -> InstallReport {

@@ -5,7 +5,7 @@ import AppKit
 // top-level code and it collides with `@main`.
 
 @main
-struct WeChatAntiRecallGUIApp: App {
+struct AntiRecallGUIApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var state = AppState()
 

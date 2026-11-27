@@ -199,7 +199,7 @@ struct PatchReport {
 
 
 @main
-struct WeChatAntiRecall {
+struct AntiRecallCLI {
     static func main() {
         let arguments = Array(CommandLine.arguments.dropFirst())
         do {
@@ -237,7 +237,7 @@ struct CLI {
         case "help", "--help", "-h":
             printUsage()
         default:
-            throw ToolError.usage("未知命令：\(command)。支持命令：versions、install、restore、clone。运行 `wechat-antirecall help` 查看用法。")
+            throw ToolError.usage("未知命令：\(command)。支持命令：versions、install、restore、clone。运行 `wx-antirecall help` 查看用法。")
         }
     }
 
@@ -387,15 +387,15 @@ struct CLI {
 
     private func printUsage() {
         print("""
-        wechat-antirecall (anti-recall + multi-instance clone)
+        wx-antirecall (anti-recall + multi-instance clone)
 
         Usage:
-          wechat-antirecall versions [--app /Applications/WeChat.app] [--config patches.json] [--json]
-          wechat-antirecall install  [--app /Applications/WeChat.app] [--config patches.json] [--with-tip] [--dry-run] [--no-backup] [--skip-resign] [--json]
-          wechat-antirecall restore  --backup <path> [--binary Contents/Resources/wechat.dylib] [--app /Applications/WeChat.app] [--skip-resign]
-          wechat-antirecall clone list   [--output-dir /Applications] [--config patches.json] [--json]
-          wechat-antirecall clone create [--app /Applications/WeChat.app] [--output-dir /Applications] [--index <N>] [--patch-mode none|silent|with-tip] [--config patches.json] [--replace] [--keep-url-schemes] [--dry-run] [--skip-resign] [--json]
-          wechat-antirecall clone remove --target <path> [--dry-run] [--json]
+          wx-antirecall versions [--app /Applications/WeChat.app] [--config patches.json] [--json]
+          wx-antirecall install  [--app /Applications/WeChat.app] [--config patches.json] [--with-tip] [--dry-run] [--no-backup] [--skip-resign] [--json]
+          wx-antirecall restore  --backup <path> [--binary Contents/Resources/wechat.dylib] [--app /Applications/WeChat.app] [--skip-resign]
+          wx-antirecall clone list   [--output-dir /Applications] [--config patches.json] [--json]
+          wx-antirecall clone create [--app /Applications/WeChat.app] [--output-dir /Applications] [--index <N>] [--patch-mode none|silent|with-tip] [--config patches.json] [--replace] [--keep-url-schemes] [--dry-run] [--skip-resign] [--json]
+          wx-antirecall clone remove --target <path> [--dry-run] [--json]
 
         Notes:
           Supported builds: 270390 and 270601 (silent + --with-tip native recall notice), 270416 (silent only).
@@ -901,7 +901,7 @@ private func requireWritable(_ url: URL, operation: String) throws {
 
 func requireDirectoryWritable(_ url: URL, operation: String) throws {
     // Same reason as requireWritable: use a real create/delete probe rather than access().
-    let probeURL = url.appendingPathComponent(".wechat-antirecall-write-test-\(UUID().uuidString)")
+    let probeURL = url.appendingPathComponent(".wx-antirecall-write-test-\(UUID().uuidString)")
     do {
         try Data().write(to: probeURL, options: .withoutOverwriting)
         try FileManager.default.removeItem(at: probeURL)
@@ -921,7 +921,7 @@ private func makeBackup(of fileURL: URL) throws -> URL {
     let suffix = formatter.string(from: Date())
     let backupURL = fileURL
         .deletingLastPathComponent()
-        .appendingPathComponent("\(fileURL.lastPathComponent).wechat-antirecall-backup-\(suffix)")
+        .appendingPathComponent("\(fileURL.lastPathComponent).wx-antirecall-backup-\(suffix)")
 
     do {
         let data = try Data(contentsOf: fileURL)
@@ -1104,7 +1104,7 @@ private func signMachOUsingTemporaryCopy(
     preserveMetadata: Bool
 ) throws {
     let temporaryDirectory = FileManager.default.temporaryDirectory
-        .appendingPathComponent("wechat-antirecall-sign-\(UUID().uuidString)", isDirectory: true)
+        .appendingPathComponent("wx-antirecall-sign-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
     defer {
         try? FileManager.default.removeItem(at: temporaryDirectory)
@@ -1265,7 +1265,7 @@ private func withTemporaryEntitlementsFile<T>(
     }
 
     let temporaryDirectory = FileManager.default.temporaryDirectory
-        .appendingPathComponent("wechat-antirecall-entitlements-\(UUID().uuidString)", isDirectory: true)
+        .appendingPathComponent("wx-antirecall-entitlements-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
     defer {
         try? FileManager.default.removeItem(at: temporaryDirectory)

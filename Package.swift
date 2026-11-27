@@ -3,25 +3,25 @@
 import PackageDescription
 
 let package = Package(
-    name: "wechat-antirecall",
+    name: "wx-antirecall",
     platforms: [
         .macOS(.v12)
     ],
     products: [
-        .executable(name: "wechat-antirecall", targets: ["WeChatAntiRecall"]),
-        .executable(name: "WeChatAntiRecallGUI", targets: ["WeChatAntiRecallGUI"])
+        .executable(name: "wx-antirecall", targets: ["AntiRecallCLI"]),
+        .executable(name: "AntiRecallGUI", targets: ["AntiRecallGUI"])
     ],
     targets: [
-        .executableTarget(name: "WeChatAntiRecall"),
-        // SwiftUI GUI shell. It shells out to the prebuilt `wechat-antirecall` CLI (bundled
+        .executableTarget(name: "AntiRecallCLI"),
+        // SwiftUI GUI shell. It shells out to the prebuilt `wx-antirecall` CLI (bundled
         // in the .app's Resources), so it has NO dependency on the CLI target. Packaged into
         // a proper .app bundle by Scripts/make-app.sh.
-        .executableTarget(name: "WeChatAntiRecallGUI"),
+        .executableTarget(name: "AntiRecallGUI"),
         .testTarget(
-            name: "WeChatAntiRecallTests",
+            name: "AntiRecallTests",
             dependencies: [
-                "WeChatAntiRecall",
-                "WeChatAntiRecallGUI"
+                "AntiRecallCLI",
+                "AntiRecallGUI"
             ]
         )
     ]

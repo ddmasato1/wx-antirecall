@@ -10,7 +10,7 @@ struct CLIResult {
     var succeeded: Bool { exitCode == 0 && !cancelled }
 }
 
-// Runs the bundled `wechat-antirecall` CLI. Unprivileged commands (versions, dry-run)
+// Runs the bundled `wx-antirecall` CLI. Unprivileged commands (versions, dry-run)
 // go through `runUser`; privileged ones (install) go through `runAdmin`, which
 // prompts once for an admin password via osascript.
 enum CLIRunner {

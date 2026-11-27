@@ -1,14 +1,13 @@
 import Foundation
 import XCTest
-@testable import WeChatAntiRecall
+@testable import AntiRecallCLI
 
-/// This fork ships a deliberately small build matrix and one patch target. Guard that
-/// invariant so a future regeneration of patches.json cannot silently reintroduce
-/// other builds/features.
+/// Guard the supported build matrix and patch targets so a future edit to patches.json
+/// cannot accidentally drop required fields or alter verified instruction bytes.
 final class SilentOnlyPatchConfigTests: XCTestCase {
     private var catalogURL: URL {
         URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()   // Tests/WeChatAntiRecallTests
+            .deletingLastPathComponent()   // Tests/AntiRecallTests
             .deletingLastPathComponent()   // Tests
             .deletingLastPathComponent()   // repo root
             .appendingPathComponent("patches.json")
@@ -142,8 +141,8 @@ final class AppSignaturePolicyTests: XCTestCase {
     }
 }
 
-/// The two modes are mutually exclusive: both touch the parser entry, so installing
-/// both would be order-dependent. Guard the upstream-verified 270390 tip bytes too.
+/// The two modes are mutually exclusive: on 270390 both touch the parser entry, so installing
+/// both would be order-dependent. Guard the verified 270390 tip bytes too.
 final class RevokeTipConfigTests: XCTestCase {
     private var catalogURL: URL {
         URL(fileURLWithPath: #filePath)
@@ -153,7 +152,7 @@ final class RevokeTipConfigTests: XCTestCase {
             .appendingPathComponent("patches.json")
     }
 
-    func testTipTargetBytesMatchUpstream270390Record() throws {
+    func testTipTargetBytesMatchBuild270390Record() throws {
         let configs = try JSONDecoder().decode([VersionConfig].self, from: Data(contentsOf: catalogURL))
         let build = try XCTUnwrap(configs.first(where: { $0.version == "270390" }))
         let tip = try XCTUnwrap(build.targets.first(where: { $0.identifier == "revoke-tip" }))

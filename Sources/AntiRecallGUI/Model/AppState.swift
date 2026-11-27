@@ -336,11 +336,11 @@ final class AppState: ObservableObject {
         guard reportedSchemaVersion < GUICLIProtocol.schemaVersion else { return false }
         let fm = FileManager.default
         let builtDir = BundledPaths.appSupportDir.appendingPathComponent("build", isDirectory: true)
-        let stale = builtDir.appendingPathComponent("wechat-antirecall")
+        let stale = builtDir.appendingPathComponent("wx-antirecall")
         guard fm.isExecutableFile(atPath: stale.path) else { return false }
         let suffix = ".stale-schema\(reportedSchemaVersion)-\(Int(Date().timeIntervalSince1970))"
         do {
-            try fm.moveItem(at: stale, to: builtDir.appendingPathComponent("wechat-antirecall\(suffix)"))
+            try fm.moveItem(at: stale, to: builtDir.appendingPathComponent("wx-antirecall\(suffix)"))
             return true
         } catch {
             return false
@@ -387,7 +387,7 @@ final class AppState: ObservableObject {
     static func probeInstallAccess(appPath: String) -> InstallAccess {
         let fm = FileManager.default
         let resources = URL(fileURLWithPath: appPath).appendingPathComponent("Contents/Resources", isDirectory: true)
-        let probe = resources.appendingPathComponent(".wechat-antirecall-access-probe-\(UUID().uuidString)")
+        let probe = resources.appendingPathComponent(".wx-antirecall-access-probe-\(UUID().uuidString)")
         if (try? Data().write(to: probe, options: .withoutOverwriting)) != nil {
             try? fm.removeItem(at: probe)
             return .writableAsUser
@@ -533,7 +533,7 @@ final class AppState: ObservableObject {
     static func canWriteDirectory(_ path: String) -> Bool {
         let fm = FileManager.default
         let dirURL = URL(fileURLWithPath: path, isDirectory: true)
-        let probeURL = dirURL.appendingPathComponent(".wechat-antirecall-dir-probe-\(UUID().uuidString)")
+        let probeURL = dirURL.appendingPathComponent(".wx-antirecall-dir-probe-\(UUID().uuidString)")
         if (try? Data().write(to: probeURL, options: .withoutOverwriting)) != nil {
             try? fm.removeItem(at: probeURL)
             return true

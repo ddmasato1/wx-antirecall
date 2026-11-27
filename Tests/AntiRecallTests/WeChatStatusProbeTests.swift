@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
-@testable import WeChatAntiRecall
-@testable import WeChatAntiRecallGUI
+@testable import AntiRecallCLI
+@testable import AntiRecallGUI
 
 final class WeChatStatusProbeTests: XCTestCase {
     func testPathMatchesOnlySelectedBundleAndItsChildren() {

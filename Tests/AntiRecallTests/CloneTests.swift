@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import WeChatAntiRecall
+@testable import AntiRecallCLI
 
 final class CloneTests: XCTestCase {
     func testCloneMetadataAndLocalizationRules() {
@@ -136,10 +136,10 @@ final class CloneTests: XCTestCase {
 
         // Inherited backup files must be stripped from the clone while preserved in the source.
         let cloneBackup = cloneURL.appendingPathComponent(
-            "Contents/Resources/wechat.dylib.wechat-antirecall-backup-20260101-000000"
+            "Contents/Resources/wechat.dylib.wx-antirecall-backup-20260101-000000"
         )
         let sourceBackup = fixture.sourceAppURL.appendingPathComponent(
-            "Contents/Resources/wechat.dylib.wechat-antirecall-backup-20260101-000000"
+            "Contents/Resources/wechat.dylib.wx-antirecall-backup-20260101-000000"
         )
         XCTAssertFalse(FileManager.default.fileExists(atPath: cloneBackup.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: sourceBackup.path))
@@ -307,7 +307,7 @@ final class CloneTests: XCTestCase {
     ) throws -> WeChatFixture {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent(
-            "wechat-antirecall-clone-tests-\(UUID().uuidString)",
+            "wx-antirecall-clone-tests-\(UUID().uuidString)",
             isDirectory: true
         )
         let sourceDir = root.appendingPathComponent("source", isDirectory: true)
@@ -380,7 +380,7 @@ final class CloneTests: XCTestCase {
         let configs = try JSONDecoder().decode([VersionConfig].self, from: Data(configJSON.utf8))
 
         if includeBackupArtifact {
-            let backupURL = resourcesDir.appendingPathComponent("wechat.dylib.wechat-antirecall-backup-20260101-000000")
+            let backupURL = resourcesDir.appendingPathComponent("wechat.dylib.wx-antirecall-backup-20260101-000000")
             try Data("backup".utf8).write(to: backupURL)
         }
 
