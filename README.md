@@ -2,9 +2,9 @@
 
 一款轻量、纯离线的 macOS 微信防撤回与多开分身管理工具，专注做好两件事：**让别人撤回的消息原样保留**，以及**安全创建独立微信多开分身**。
 
-| 首页 | 支持版本 | 权限帮助 |
-| :---: | :---: | :---: |
-| ![首页](docs/screenshots/home.jpg) | ![支持版本](docs/screenshots/versions.jpg) | ![权限帮助](docs/screenshots/permissions.jpg) |
+| 首页 | 微信多开 | 支持版本 | 权限帮助 |
+| :---: | :---: | :---: | :---: |
+| ![首页](docs/screenshots/home.jpg) | ![微信多开](docs/screenshots/clone.jpg) | ![支持版本](docs/screenshots/versions.jpg) | ![权限帮助](docs/screenshots/permissions.jpg) |
 
 ## 特性
 
