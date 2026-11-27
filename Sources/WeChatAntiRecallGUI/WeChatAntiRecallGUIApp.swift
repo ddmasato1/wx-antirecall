@@ -13,8 +13,10 @@ struct WeChatAntiRecallGUIApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(state)
-                .frame(minWidth: 860, minHeight: 600)
+                .frame(minWidth: 540, idealWidth: 580, maxWidth: 720, minHeight: 620, idealHeight: 680)
+                .background(WindowConfigurator())
         }
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {}   // no "New Window"
         }

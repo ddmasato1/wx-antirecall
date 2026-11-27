@@ -19,23 +19,49 @@ struct SupportedVersionsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.gap) {
-            Text("支持的版本").font(.title2.weight(.semibold))
-            Text("本精简版只为以下微信构建号内置补丁数据，不会从网络拉取其他版本的补丁。")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            Card(padding: 16) {
+                HStack(alignment: .center, spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .fill(Theme.accentSoft)
+                            .frame(width: 40, height: 40)
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                    }
 
-            if loadFailed {
-                Card {
-                    HStack(spacing: 10) {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                        Text("无法读取内置补丁数据（patches.json）。")
-                            .font(.callout).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Text("内置离线支持列表")
+                                .font(.system(size: 16, weight: .bold))
+                            if !rows.isEmpty {
+                                StatusPill(tone: .neutral, text: "共 \(rows.count) 个构建版本")
+                            }
+                        }
+                        Text("仅对经过精确校验的微信构建号打补丁，全程离线运行，不联网拉取外部补丁数据。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
 
-            ForEach(rows) { row in
-                rowCard(row)
+            if loadFailed {
+                Card {
+                    HStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Theme.amber)
+                        Text("无法读取内置补丁数据（patches.json）。")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(rows) { row in
+                        rowCard(row)
+                    }
+                }
             }
         }
         .onAppear(perform: reload)
@@ -66,36 +92,49 @@ struct SupportedVersionsView: View {
 
     private func rowCard(_ row: SupportedVersionRow) -> some View {
         let installed = isInstalledBuild(row)
-        return Card {
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: "bubble.left.and.text.bubble.right.fill")
-                    .font(.title3)
-                    .foregroundStyle(installed ? Theme.accent : Color.secondary.opacity(0.6))
-                    .frame(width: 26)
+        return Card(padding: 15) {
+            HStack(alignment: .center, spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(installed ? Theme.accentSoft : Theme.surfaceSubtle)
+                        .frame(width: 38, height: 38)
+                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(installed ? Theme.accent : .secondary)
+                }
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         Text("微信 \(row.wechatVersion)")
-                            .font(.body.weight(.semibold))
-                        Text("-")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                        MonoChip(text: row.build)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        MonoChip(text: row.build, prefix: "Build")
                     }
+
                     HStack(spacing: 6) {
-                        if row.silent { modeTag("静默防撤回") }
-                        if row.tip { modeTag("显示撤回提示") }
+                        if row.silent {
+                            capabilityTag(icon: "eye.slash.fill", text: "静默保留")
+                        }
+                        if row.tip {
+                            capabilityTag(icon: "eye.fill", text: "撤回提示")
+                        } else {
+                            Text("仅支持静默模式")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                 }
-                Spacer()
+
+                Spacer(minLength: 8)
+
                 if installed {
-                    StatusPill(tone: .good, text: "当前安装", systemImage: "checkmark.circle.fill")
+                    StatusPill(tone: .good, text: "本机当前版本", systemImage: "checkmark.circle.fill")
                 }
             }
         }
         .overlay(
             RoundedRectangle(cornerRadius: Theme.corner, style: .continuous)
-                .strokeBorder(installed ? Theme.accent.opacity(0.45) : .clear, lineWidth: 1)
+                .strokeBorder(installed ? Theme.accentBorder : .clear, lineWidth: 1.5)
         )
     }
 
@@ -103,12 +142,16 @@ struct SupportedVersionsView: View {
         state.displayBuild != "—" && state.displayBuild == row.build
     }
 
-    private func modeTag(_ text: String) -> some View {
-        Text(text)
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Capsule().fill(Theme.accent.opacity(0.14)))
-            .foregroundStyle(Theme.accent)
+    private func capabilityTag(icon: String, text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 9.5, weight: .semibold))
+            Text(text)
+                .font(.caption2.weight(.medium))
+        }
+        .padding(.horizontal, 7.5)
+        .padding(.vertical, 3)
+        .foregroundStyle(Theme.accent)
+        .background(Capsule().fill(Theme.accentSoft))
     }
 }

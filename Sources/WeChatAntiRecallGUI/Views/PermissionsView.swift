@@ -4,91 +4,147 @@ import AppKit
 struct PermissionsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.gap) {
-            Text("权限与帮助").font(.title2.weight(.semibold))
-
             permissionCard(
                 icon: "app.badge.checkmark",
-                title: "App 管理",
-                body: "打补丁需要修改「应用程序」里的微信。如果安装时报「Operation not permitted」，请在这里给本 App 授权。",
+                tint: Theme.accent,
+                title: "App 管理权限",
+                badge: "按需授权本工具",
+                body: "打补丁需要修改「应用程序」目录中的微信。若安装时提示「Operation not permitted」，请在此处为本工具开启授权。",
                 buttonTitle: "打开 App 管理设置",
                 url: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles"
             )
 
             permissionCard(
                 icon: "externaldrive.badge.person.crop",
-                title: "完全磁盘访问",
-                body: "安装会自动保留并校验微信主程序、Helper 和扩展的麦克风、摄像头、网络与沙盒 entitlements；但 ad-hoc 重签名仍会改变原厂签名身份。新版 macOS（26/27）可能因此拒绝微信访问它的数据目录，导致打补丁后微信打不开。给微信本身授予「完全磁盘访问」即可解决。\n注意：每次重新打补丁或微信升级后，签名会变，可能需要在列表里删掉旧的微信重新添加。",
+                tint: Theme.info,
+                title: "完全磁盘访问权限",
+                badge: "遇到打不开时配置",
+                body: "安装会自动保留微信主程序及扩展的麦克风、摄像头、网络等权限声明；但本地重签名会改变原厂签名身份。若新版 macOS 因此拦截微信读取数据目录导致打不开，请将「微信」加入完全磁盘访问列表（重打补丁或升级微信后可能需删除旧项重新添加）。",
                 buttonTitle: "打开完全磁盘访问设置",
                 url: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
             )
 
-            Card {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.shield").foregroundStyle(Theme.accent)
-                        SectionLabel(text: "无需关闭 SIP")
-                    }
-                    Text("本工具只修改「应用程序」里的第三方微信，不碰系统保护区域，因此不需要关闭系统完整性保护（SIP）。")
-                        .font(.callout).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+            // Consolidated guide card for clean visual hierarchy
+            Card(padding: 18) {
+                VStack(alignment: .leading, spacing: 14) {
+                    SectionLabel(
+                        text: "安全机制与恢复指南",
+                        subtitle: "常见疑问与原版还原说明"
+                    )
 
-            Card {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "testtube.2").foregroundStyle(.orange)
-                        SectionLabel(text: "安装后请做一次实测")
-                    }
-                    Text("补丁点检查通过，并不能证明防撤回在真实撤回时一定生效。第一次在某个版本上使用时，建议用另一台设备或账号发一条消息再撤回，确认原消息是否留存。")
-                        .font(.callout).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+                    guideItem(
+                        icon: "checkmark.shield.fill",
+                        tint: Theme.accent,
+                        title: "无需关闭系统完整性保护（SIP）",
+                        detail: "本工具仅修改「应用程序」目录内的第三方微信文件，不触碰任何 macOS 系统受保护区域。"
+                    )
 
-            Card {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.uturn.backward.circle").foregroundStyle(.secondary)
-                        SectionLabel(text: "如何恢复到原版微信")
-                    }
-                    Text("本版本不提供恢复/卸载功能。如需恢复，请完全退出微信后，从微信官网下载受支持版本的安装包重新安装覆盖即可；聊天记录保存在本机，重装不会丢失。")
-                        .font(.callout).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button {
-                        if let url = URL(string: "https://www.weixin.qq.com/") {
-                            NSWorkspace.shared.open(url)
+                    Rectangle()
+                        .fill(Theme.subtleDivider)
+                        .frame(height: 1)
+
+                    guideItem(
+                        icon: "testtube.2",
+                        tint: Theme.amber,
+                        title: "首次安装建议做一次真机实测",
+                        detail: "补丁点校验通过后，建议用另一账号或手机发一条测试消息并撤回，确认消息留存效果符合预期。"
+                    )
+
+                    Rectangle()
+                        .fill(Theme.subtleDivider)
+                        .frame(height: 1)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        guideItem(
+                            icon: "arrow.uturn.backward.circle.fill",
+                            tint: .secondary,
+                            title: "如何恢复到原版微信",
+                            detail: "完全退出微信后，从微信官网下载安装包直接覆盖安装即可恢复原厂签名；本地聊天记录保存在独立数据目录中，覆盖重装不会丢失。"
+                        )
+
+                        HStack {
+                            Spacer()
+                            Button {
+                                if let url = URL(string: "https://weixin.qq.com") {
+                                    NSWorkspace.shared.open(url)
+                                }
+                            } label: {
+                                Label("访问微信官网下载", systemImage: "safari")
+                            }
+                            .buttonStyle(SecondaryPillButtonStyle(compact: true))
                         }
-                    } label: {
-                        Label("打开微信官网", systemImage: "arrow.up.forward.app")
                     }
-                    .buttonStyle(.bordered)
                 }
             }
         }
     }
 
-    private func permissionCard(icon: String, title: String, body text: String, buttonTitle: String, url: String) -> some View {
-        Card {
+    private func permissionCard(
+        icon: String,
+        tint: Color,
+        title: String,
+        badge: String,
+        body text: String,
+        buttonTitle: String,
+        url: String
+    ) -> some View {
+        Card(padding: 18) {
             HStack(alignment: .top, spacing: 14) {
-                Image(systemName: icon)
-                    .font(.title3)
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 38, height: 38)
-                    .background(Circle().fill(Theme.accent.opacity(0.14)))
+                ZStack {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(tint.opacity(0.13))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: icon)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(tint)
+                }
 
-                VStack(alignment: .leading, spacing: 10) {
-                    SectionLabel(text: title)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Text(title)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text(badge)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(tint)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2.5)
+                            .background(Capsule().fill(tint.opacity(0.12)))
+                    }
+
                     Text(text)
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+
                     Button {
                         if let u = URL(string: url) { NSWorkspace.shared.open(u) }
                     } label: {
                         Label(buttonTitle, systemImage: "arrow.up.forward.app")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(SecondaryPillButtonStyle(compact: true))
+                    .padding(.top, 2)
                 }
+            }
+        }
+    }
+
+    private func guideItem(icon: String, tint: Color, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 20, alignment: .center)
+                .padding(.top, 1)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
