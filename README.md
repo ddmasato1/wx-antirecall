@@ -2,6 +2,10 @@
 
 一款轻量、纯离线的 macOS 微信防撤回工具，仅做一件事：**让别人撤回的消息原样保留**。
 
+| 首页 | 支持版本 | 权限帮助 |
+| :---: | :---: | :---: |
+| ![首页](docs/screenshots/home.jpg) | ![支持版本](docs/screenshots/versions.jpg) | ![权限帮助](docs/screenshots/permissions.jpg) |
+
 ## 特性
 
 - **纯字节补丁**：直接修补目标指令，无需注入 `dylib`、无需常驻后台进程、无需关闭 SIP。
