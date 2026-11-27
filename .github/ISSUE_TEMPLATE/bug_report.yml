@@ -1,0 +1,46 @@
+name: 问题反馈（Bug Report）
+description: 反馈补丁安装失败、检测异常或防撤回失效问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请确认：本工具**仅支持 Apple Silicon Mac** 及**微信官网 DMG 版**（不支持 Mac App Store 版），且微信构建号需在 `README.md` 支持列表内。
+
+  - type: input
+    id: wechat-build
+    attributes:
+      label: 微信版本与构建号
+      description: 可在应用首页查看（例如：4.2.1 / Build 270601）
+      placeholder: "4.2.1 (270601)"
+    validations:
+      required: true
+
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS 版本与芯片型号
+      placeholder: "macOS 15.6 (Apple M3)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: channel
+    attributes:
+      label: 微信安装渠道
+      options:
+        - 微信官网 DMG 安装包
+        - Mac App Store（不受支持）
+        - 不确定
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述与运行日志
+      description: 请简述遇到的现象，并粘贴应用底部「运行日志」中的输出内容
+      placeholder: "在此描述复现步骤并粘贴运行日志…"
+    validations:
+      required: true

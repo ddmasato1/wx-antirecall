@@ -93,4 +93,4 @@ bash Scripts/hash-patches.sh
 
 真机验证状态：270390（静默 + 提示）与 270601（静默 + 提示）已在本机完成真实账号撤回实测；270416 未做真机实测。
 
-发布：本地用 `bash Scripts/make-app.sh` 构建 `dist/AntiRecall.app`。仓库内 `.github/workflows/` 有三个工作流：`ci.yml`（push main / PR 时 swift build + swift test + release 构建）、`release.yml`（push `v*` tag 或手动 workflow_dispatch 时构建 `dist/AntiRecall-<tag>.dmg` 并 `gh release create` 发布）、`claude.yml`（上游遗留，需 `@claude` 触发且依赖 `CLAUDE_CODE_OAUTH_TOKEN` secret，私有仓库未配置时不会生效）。`origin` 是私有仓库 `ddmasato1/wx-antirecall`，`upstream` 为上游只读。发布说明里不要写「拉取最新补丁数据」。
+发布：本地用 `bash Scripts/make-app.sh` 构建 `dist/AntiRecall.app`。仓库内 `.github/workflows/` 包含 `ci.yml`（push main / PR 时执行 `swift build`、`swift test` 与 release 构建）和 `release.yml`（push `v*` tag 或手动触发时构建 `dist/AntiRecall-<tag>.dmg` 并发布 GitHub Release）。发布说明里不要写「拉取最新补丁数据」。

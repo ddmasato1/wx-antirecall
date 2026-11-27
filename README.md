@@ -1,141 +1,81 @@
-# 微信防撤回（静默版）
+# AntiRecall（微信防撤回）
 
-**只做一件事：让受支持构建里别人撤回的消息原样保留。** 可选两种效果：静默保留，或保留的同时显示微信原生的「xxx 撤回了一条消息」提示。
+一款轻量、纯离线的 macOS 微信防撤回工具，仅做一件事：**让别人撤回的消息原样保留**。
 
-## 支持的版本
+## 特性
 
-| 微信版本 | 构建号 | 来源 |
-| --- | --- | --- |
-| 4.2.0.54 | **270390** | 官网 dmg（补丁点双重验证） |
-| 4.2.0 | **270416** | 曾为 App Store 渠道版本（仅静默） |
-| 4.2.1 | **270601** | 官网当前版本（静默 + 提示均支持，已真机验证） |
+- **纯字节补丁**：直接修补目标指令，无需注入 `dylib`、无需常驻后台进程、无需关闭 SIP。
+- **双模式切换**：
+  - **静默保留**（默认）：消息无痕留下，界面无任何提示。
+  - **显示撤回提示**：保留原消息的同时，显示微信原生「撤回了一条消息」提示。
+- **安全离线校验**：内置精确的离线补丁表，不联网拉取未知数据；安装前自动 `dry-run` 预检并备份原文件，重签名后逐项校验 entitlements。
+- **原生 SwiftUI 界面**：紧凑单栏设计，自适应 macOS 亮/暗双色外观，内置运行日志抽屉。
 
-其他构建号一律拒绝安装，也不会拉取新版补丁数据。
+## 支持环境
 
-## 两种显示效果
+- **系统要求**：Apple Silicon（M 系列）Mac，macOS 12+（暂不支持 Intel Mac）
+- **微信渠道**：仅支持**微信官网 DMG 版**（不支持 Mac App Store 版）
 
-| 模式 | 效果 | 支持的构建号 |
-| --- | --- | --- |
-| 静默保留（默认） | 原消息留下，不显示任何提示 | 270390 / 270416 / 270601 |
-| 显示撤回提示 | 原消息留下，同时显示微信原生撤回提示 | 270390 / 270601 |
+| 微信版本 | 构建号（Build） | 静默保留 | 显示撤回提示 |
+| --- | --- | :---: | :---: |
+| 4.2.0.54 | `270390` | ✅ | ✅ |
+| 4.2.0 | `270416` | ✅ | — |
+| 4.2.1 | `270601` | ✅ | ✅ |
 
-在首页的两张模式卡片里选择，再点开启即可。两种模式都是**纯字节补丁**，不需要注入 dylib、不需要常驻进程、不需要自定义提示文本。
+## 快速开始
 
-原理差别（按构建）：
+1. 从 [Releases](../../releases) 下载最新 `.dmg`（或自行从源码构建），将 `AntiRecall.app` 拖入「应用程序」。
+2. **首次打开**：右键点击 `AntiRecall.app` →「打开」以通过 Gatekeeper 提示。
+3. **完全退出微信**，打开 `AntiRecall`，确认检测到受支持版本后选择拦截模式并点击开启。
+4. 重新打开微信，建议用另一账号发送并撤回一条测试消息以验证效果。
 
-- **270390 / 270416**：静默模式把撤回解析器入口的 `cbz w0` 改成无条件 `b`，整个撤回处理被跳过，所以连微信自带提示都不显示。
-- **270601**：撤回解析器重构（`0x413bca8` 起 `0xa30` 字节），静默改为把「`revokemsg` 节点闸门」`cbz w0`（`0x413be8c`，`00180034`）改成 `NOP`（`1F2003D5`）——撤回消息会走「找不到节点 → 记日志 → 返回 0」的现成安全路径，与其他 sysmsg 类型一致。
-- 提示模式（270390 与 270601 同理）：把 `newMsgId` 字段写入 `str x0,[x19,#0x1c8]`（`60E600F9`）改成 `str xzr`（`7FE600F9`）——微信照常生成原生撤回提示，却按 newMsgId 找不到原消息，于是消息保留。270601 的写入点在 `0x413c238`，与静默点地址独立，模式切换互不干扰。
+> [!NOTE]
+> 如安装后遇到写入受阻或微信无法打开，请参考应用内「**权限帮助**」页面授予对应权限（**App 管理** / **完全磁盘访问**）。如需恢复原版微信，完全退出后从[微信官网](https://weixin.qq.com)下载安装包覆盖重装即可（本地聊天记录不会丢失）。
 
-**已知限制**（上游实测说明）：提示模式是纯字节补丁，你自己撤回消息时桌面端可能留下重复的撤回提示；别人撤回是正常场景。270416 的提示补丁点未定位（缺二进制样本），暂只提供静默模式。
+## 从源码构建
 
-## 不支持 App Store 版微信
+需要 macOS 15 / Xcode 16+（Swift 6）：
 
-本工具会对微信做 ad-hoc 重签名。**Mac App Store 安装的微信不能用**：它由 Apple 的 `Software Signing` 身份签名；ad-hoc 重签会破坏该签名，导致微信无法启动。官网 dmg 版由 Tencent 的 Developer ID 签名，重签后可以启动。
+```bash
+# 运行单元测试
+swift test
 
-安装前工具按**渠道**判断，而不是按当前签名状态（也不是 provenance 属性）：
-- 存在 `Contents/_MASReceipt/receipt`（App Store 收据）或签名为 `Software Signing` → 拒绝，不写任何字节
-- 官网 dmg 的 `Developer ID Application: Tencent ...` → 放行
-- 已经是 ad-hoc 签名 → **照样放行**：这正是本工具成功开启后的正常状态。早期版本按 ad-hoc 拒绝，导致装完每次检测都误报「检测失败」，已修正。
+# 打包生成 dist/AntiRecall.app
+bash Scripts/make-app.sh
+open dist/AntiRecall.app
+```
 
-如果已经把 App Store 版微信改到无法启动：本工具无法修复（补丁只改 dylib 字节，不会还原 Apple 原始签名）。请卸载微信后重新安装，聊天记录保留在 `~/Library/Containers/com.tencent.xinWeChat/`。
+## 命令行（CLI）
 
-## 版本与渠道提示
-
-- 270601（4.2.1，官网当前版本）已支持，正常升级即可使用本工具。
-- 如需回退 270390：注意官方直链 `WeChatMac_4.2.0.dmg` 的内容**会被腾讯换货**（2026-11 中旬曾换成 4.2.1 内容，GitHub/uptodown 的「4.2.0.54」归档同样不可信）。可靠的 270390 dmg 备份见本地 `~/Downloads/WeChatMac_4.2.0.54-270390.dmg`（dylib SHA-256 `685914bf…eecd2b8`），务必异地再存一份。
-- 无论哪个版本，安装补丁后都建议在微信设置里关闭「有新版本时自动升级微信」。
-
-## 这个版本删掉了什么
-
-- 只保留**防撤回**：`patches.json` 里只有 `revoke` / `revoke-tip` 两个 target（270416 只有 `revoke`）。
-- 删除了自定义提示、撤回记录、关键词提醒、窗口隐私、自动红包、微信多开、屏蔽自动更新、检查更新/源码构建。
-- 删除了注入微信的运行时 dylib（`libWeChatAntiRecallRuntime.dylib`）及其全部 hook 代码。
-
-保留的通用链路：版本检测、dry-run 预检、备份、二进制补丁、重签名与 entitlements 校验、权限引导。GUI 的「恢复 / 卸载」界面已删除（恢复请重装官网版微信，见「权限与帮助」页说明）；CLI 的 `restore` 子命令保留，作为开发者自救通道。
-
-## 支持的平台
-
-- Apple Silicon（M 系列）Mac，macOS 12+
-- 上表中的三个微信构建号
-- 不适配 Intel Mac，不适配其他微信构建号
-
-## 使用
-
-1. 完全退出微信。
-2. 打开「微信防撤回」App（首次打开需右键 → 打开）。
-3. 首页确认构建号在支持列表内，选一种模式，点「开启防撤回」。
-4. 重新打开微信。用另一账号发一条消息并撤回，确认原消息仍在。
-
-恢复：本版本不在 GUI 里提供恢复/卸载。如需恢复到原版微信，完全退出微信后从官网下载受支持版本的安装包重新安装覆盖即可（聊天记录不丢失）；开发者可用 CLI 的 `restore` 子命令从备份还原。
-
-## 命令行
-
-在仓库根目录：
+工具核心与 GUI 解耦，也可直接使用命令行：
 
 ```bash
 swift build -c release --product wechat-antirecall
 WXAR_CLI="$(swift build -c release --show-bin-path)/wechat-antirecall"
 
-# 查看支持的版本
+# 查看当前微信版本与支持状态
 "$WXAR_CLI" versions --app /Applications/WeChat.app --config ./patches.json
 
-# 只检查，不修改
+# 仅检查补丁点（不修改文件）
 "$WXAR_CLI" install --dry-run --app /Applications/WeChat.app --config ./patches.json
 
-# 安装（需先退出微信）
+# 安装防撤回（加入 --with-tip 可启用撤回提示模式）
 "$WXAR_CLI" install --app /Applications/WeChat.app --config ./patches.json
 
-# 从备份恢复
+# 从备份还原
 "$WXAR_CLI" restore --app /Applications/WeChat.app \
   --binary Contents/Resources/wechat.dylib \
   --backup /Applications/WeChat.app/Contents/Resources/wechat.dylib.wechat-antirecall-backup-YYYYMMDD-HHMMSS
 ```
 
-`install` 只接受通用参数：`--app`、`--config`、`--dry-run`、`--no-backup`、`--skip-resign`、`--json`。传入已删除功能的参数会直接报错。
+更多底层补丁原理与适配记录见 [MAINTAINING.md](MAINTAINING.md)。
 
-## 构建图形界面
+## 免责声明
 
-```bash
-bash Scripts/make-icon.sh
-bash Scripts/make-app.sh
-open dist/AntiRecall.app
-```
+- 本项目仅供个人学习 macOS Mach-O 二进制结构与签名机制的技术研究使用，**严禁用于任何商业用途或违反法律法规的场景**。
+- 本项目为独立第三方开源工具，与腾讯公司及微信官方没有任何关联。
+- 修改客户端二进制文件可能违反目标软件的用户服务协议；使用本工具所产生的任何后果（包括但不限于程序异常、账号限制等）均由使用者本人自行承担，开发者不承担任何直接或间接责任。
 
-打包产物包含 GUI、CLI、`patches.json` 和图标，不再包含 dylib。
+## 开源协议
 
-## 补丁内容
-
-全部是单条 arm64 指令替换（每处 4 字节），`patches.json` 为唯一事实来源：
-
-| 构建号 | target | 地址 | 原始字节 | 补丁字节 |
-| --- | --- | --- | --- | --- |
-| 270390 | revoke | `0x461413c` | `40100034` | `82000014` |
-| 270390 | revoke-tip | `0x461413c` / `0x4614904` | `60E600F9` | `7FE600F9` |
-| 270416 | revoke | `0x4666e98` | `40100034` | `82000014` |
-| 270601 | revoke | `0x413be8c` | `00180034` | `1F2003D5` |
-| 270601 | revoke-tip | `0x413c238` | `60E600F9` | `7FE600F9` |
-
-（revoke-tip 先把入口恢复原值再改写 newmsgid 写入指令，见 MAINTAINING.md。）
-
-修改后整包 ad-hoc 重签名，并逐项比对 entitlements；不一致则中止安装。
-
-270416 的补丁点由本机构建直接定位：`parseRevokeXML` 函数 `0x4666c28`–`0x4667d44`（`0x111c` 字节），静默分支在入口 `+0x270`，`newmsgid` 写入在 `+0xa10`，唯一直接调用点在 `0x4666ba4`（入口 `-0x84`）。这组几何特征与已验证的 270352 完全一致，并在整个 arm64 切片中唯一命中；分支跳转目标 `0x46670a0` 与补丁字节解码一致。
-
-270601 的撤回解析器被重构（`0x413bca8` 起 `0xa30` 字节），用 Capstone 全量反汇编并与 270390 已验证函数做骨架对齐定位，方法与几何特征记录在 MAINTAINING.md。
-
-## 已知限制
-
-- 微信升级到上表以外的构建后，工具会显示「暂不支持」。本分支不提供其他版本适配。
-- 安装会改变微信签名身份。官网 dmg 版本安装后若打不开，给 `/Applications/WeChat.app` 授予「完全磁盘访问」；App Store 版本不支持，必须重装官网 dmg 版本。
-- 提示模式是纯字节补丁，你自己撤回消息时桌面端可能留下重复的撤回提示；别人撤回是正常场景。
-- 270601 残留风险：解析器中存在 `revoketime` 节点存在时走 `0x413c324` 的支路（解析 content/replacemsg，不写 newmsgid）。真机验证已通过（静默 + 提示），但若未来小版本重编译，优先复查该支路。
-- 270416 未经真实账号撤回实测（缺真机环境），只完成了写入、备份、签名与恢复的静态验证；270390 与 270601 已真机验证。
-- 静态检查和真实撤回效果不是一回事，务必按上面的步骤实测。
-- 本机若只有 Command Line Tools 而没有完整 Xcode，`swift test` 会因缺少 XCTest 模块失败；`swift build` 正常。
-
-维护说明见 [MAINTAINING.md](MAINTAINING.md)。
-
----
-
-参考项目：[fzlzjerry/wechat-antirecall](https://github.com/fzlzjerry/wechat-antirecall)
+基于 [MIT License](LICENSE) 开源。参考项目：[fzlzjerry/wechat-antirecall](https://github.com/fzlzjerry/wechat-antirecall)。
